@@ -1,7 +1,6 @@
 #include <QApplication>
 #include <QPainter>
-#include "ll.h"
-#include "misc.h"
+#include "format.h"
 #include "waypoint.h"
 #include "waypointitem.h"
 #include "tooltip.h"
@@ -12,8 +11,12 @@ QString RouteItem::toolTip()
 {
 	ToolTip tt;
 
+	if (!_name.isEmpty())
+		tt.insert(qApp->translate("RouteItem", "Name"), _name);
+	if (!_desc.isEmpty())
+		tt.insert(qApp->translate("RouteItem", "Description"), _desc);
 	tt.insert(qApp->translate("RouteItem", "Distance"),
-	  ::distance(_distance, _units));
+	  Format::distance(_distance.last(), _units));
 
 	return tt.toString();
 }
@@ -21,23 +24,33 @@ QString RouteItem::toolTip()
 RouteItem::RouteItem(const Route &route, QGraphicsItem *parent)
   : PathItem(parent)
 {
-	QVector<Waypoint> r = route.route();
-	Q_ASSERT(r.count() >= 2);
+	const RouteData &r = route.routeData();
+	const QVector<qreal> &d = route.distanceData();
+	QPointF p;
 
-	new WaypointItem(r.at(0), this);
-	const QPointF &p = r.at(0).coordinates();
-	_path.moveTo(ll2mercator(QPointF(p.x(), -p.y())));
+
+	Q_ASSERT(r.count() >= 2);
+	Q_ASSERT(r.size() == d.size());
+
+	_name = r.name();
+	_desc = r.description();
+
+	new WaypointItem(r.first(), this);
+	p = r.first().coordinates().toMercator();
+	_path.moveTo(QPointF(p.x(), -p.y()));
+	_distance.append(d.first());
 	for (int i = 1; i < r.size(); i++) {
-		const QPointF &p = r.at(i).coordinates();
-		_path.lineTo(ll2mercator(QPointF(p.x(), -p.y())));
+		if (r.at(i).coordinates() == r.at(i-1).coordinates())
+			continue;
+		p = r.at(i).coordinates().toMercator();
+		_path.lineTo(QPointF(p.x(), -p.y()));
+		_distance.append(d.at(i));
 		new WaypointItem(r.at(i), this);
 	}
 
 	updateShape();
 
-	_distance = route.distance();
-
-	_marker->setPos(_path.pointAtPercent(0));
+	_marker->setPos(_path.elementAt(0));
 
 	_pen.setStyle(Qt::DotLine);
 

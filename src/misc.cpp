@@ -1,5 +1,5 @@
 #include <cmath>
-#include <QApplication>
+#include <cctype>
 #include "misc.h"
 
 
@@ -35,52 +35,16 @@ double niceNum(double x, int round)
 	return nf * pow(10.0, expv);
 }
 
-QString timeSpan(qreal time)
+int str2int(const char *str, int len)
 {
-	unsigned h, m, s;
+	int res = 0;
 
-	h = time / 3600;
-	m = (time - (h * 3600)) / 60;
-	s = time - (h * 3600) - (m * 60);
-
-	return QString("%1:%2:%3").arg(h).arg(m, 2, 10, QChar('0'))
-	  .arg(s, 2, 10, QChar('0'));
-}
-
-QString distance(qreal value, Units units)
-{
-	if (units == Imperial) {
-		if (value < MIINM)
-			return QString::number(value * M2FT, 'f', 0) + UNIT_SPACE
-			  + qApp->translate("Misc", "ft");
+	for (const char *sp = str; sp < str + len; sp++) {
+		if (::isdigit(*sp))
+			res = res * 10 + *sp - '0';
 		else
-			return QString::number(value * M2MI, 'f', 1) + UNIT_SPACE
-			  + qApp->translate("Misc", "mi");
-	} else {
-		if (value < KMINM)
-			return QString::number(value, 'f', 0) + UNIT_SPACE
-			  + qApp->translate("Misc", "m");
-		else
-			return QString::number(value * M2KM, 'f', 1) + UNIT_SPACE
-			  + qApp->translate("Misc", "km");
+			return -1;
 	}
-}
 
-QString elevation(qreal value, Units units)
-{
-	if (units == Metric)
-		return QString::number(value, 'f', 0) + UNIT_SPACE
-		  + qApp->translate("Misc", "m");
-	else
-		return QString::number(value * M2FT, 'f', 0) + UNIT_SPACE
-		  + qApp->translate("Misc", "ft");
-}
-
-QString coordinates(const QPointF &value)
-{
-	QChar yH = (value.y() < 0) ? 'S' : 'N';
-	QChar xH = (value.x() < 0) ? 'W' : 'E';
-
-	return QString::number(qAbs(value.y()), 'f', 5) + yH + "," + QChar(0x00A0)
-	  + QString::number(qAbs(value.x()), 'f', 5) + xH;
+	return res;
 }

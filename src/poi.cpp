@@ -3,8 +3,7 @@
 #include <QList>
 #include "pathitem.h"
 #include "waypointitem.h"
-#include "ll.h"
-#include "gpx.h"
+#include "data.h"
 #include "poi.h"
 
 
@@ -16,131 +15,37 @@ POI::POI(QObject *parent) : QObject(parent)
 
 bool POI::loadFile(const QString &fileName)
 {
-	QString error;
-	int errorLine;
+	Data data;
+	FileIndex index;
 
-	_error.clear();
+	_errorString.clear();
 	_errorLine = 0;
 
-	if (loadCSVFile(fileName)) {
-		emit pointsChanged();
-		return true;
-	} else {
-		error = _error;
-		errorLine = _errorLine;
-	}
-	if (loadGPXFile(fileName)) {
-		emit pointsChanged();
-		return true;
-	}
-
-	fprintf(stderr, "Error loading POI file: %s:\n", qPrintable(fileName));
-	fprintf(stderr, "CSV: line %d: %s\n", errorLine, qPrintable(error));
-	fprintf(stderr, "GPX: line %d: %s\n", _errorLine, qPrintable(_error));
-
-	if (errorLine > _errorLine) {
-		_errorLine = errorLine;
-		_error = error;
-	}
-
-	return false;
-}
-
-bool POI::loadGPXFile(const QString &fileName)
-{
-	GPX gpx;
-	FileIndex index;
-
 	index.enabled = true;
 	index.start = _data.size();
 
-	if (gpx.loadFile(fileName)) {
-		for (int i = 0; i < gpx.waypoints().size(); i++)
-			_data.append(gpx.waypoints().at(i));
-		index.end = _data.size() - 1;
-
-		for (int i = index.start; i <= index.end; i++) {
-			const QPointF &p = _data.at(i).coordinates();
-			qreal c[2];
-			c[0] = p.x();
-			c[1] = p.y();
-			_tree.Insert(c, c, i);
-		}
-
-		_files.append(fileName);
-		_indexes.append(index);
-
-		return true;
-	} else {
-		_error = gpx.errorString();
-		_errorLine = gpx.errorLine();
-	}
-
-	return false;
-}
-
-bool POI::loadCSVFile(const QString &fileName)
-{
-	QFile file(fileName);
-	FileIndex index;
-	bool ret;
-	int ln = 1;
-
-	index.enabled = true;
-	index.start = _data.size();
-
-	if (!file.open(QFile::ReadOnly | QFile::Text)) {
-		_error = qPrintable(file.errorString());
+	if (!data.loadFile(fileName)) {
+		_errorString = data.errorString();
+		_errorLine = data.errorLine();
 		return false;
 	}
 
-	while (!file.atEnd()) {
-		QByteArray line = file.readLine();
-		QList<QByteArray> list = line.split(',');
-		if (list.size() < 3) {
-			_error = "Parse error.";
-			_errorLine = ln;
-			return false;
-		}
-
-		qreal lat = list[0].trimmed().toDouble(&ret);
-		if (!ret) {
-			_error = "Invalid latitude.";
-			_errorLine = ln;
-			return false;
-		}
-		qreal lon = list[1].trimmed().toDouble(&ret);
-		if (!ret) {
-			_error = "Invalid longitude.";
-			_errorLine = ln;
-			return false;
-		}
-		Waypoint wp(QPointF(lon, lat));
-
-		QByteArray ba = list[2].trimmed();
-		QString name = QString::fromUtf8(ba.data(), ba.size());
-		wp.setName(name);
-
-		if (list.size() > 3) {
-			ba = list[3].trimmed();
-			wp.setDescription(QString::fromUtf8(ba.data(), ba.size()));
-		}
-
-		_data.append(wp);
-		ln++;
-	}
+	for (int i = 0; i < data.waypoints().size(); i++)
+		_data.append(data.waypoints().at(i));
 	index.end = _data.size() - 1;
 
 	for (int i = index.start; i <= index.end; i++) {
-		const QPointF &p = _data.at(i).coordinates();
+		const Coordinates &p = _data.at(i).coordinates();
 		qreal c[2];
-		c[0] = p.x();
-		c[1] = p.y();
+		c[0] = p.lon();
+		c[1] = p.lat();
 		_tree.Insert(c, c, i);
 	}
 
 	_files.append(fileName);
 	_indexes.append(index);
+
+	emit pointsChanged();
 
 	return true;
 }
@@ -161,11 +66,11 @@ QVector<Waypoint> POI::points(const PathItem *path) const
 	const QPainterPath &pp = path->path();
 
 	for (int i = 0; i < pp.elementCount(); i++) {
-		QPointF p = mercator2ll(pp.elementAt(i));
-		min[0] = p.x() - _radius;
-		min[1] = -p.y() - _radius;
-		max[0] = p.x() + _radius;
-		max[1] = -p.y() + _radius;
+		Coordinates p = Coordinates::fromMercator(pp.elementAt(i));
+		min[0] = p.lon() - _radius;
+		min[1] = -p.lat() - _radius;
+		max[0] = p.lon() + _radius;
+		max[1] = -p.lat() + _radius;
 		_tree.Search(min, max, cb, &set);
 	}
 
@@ -186,11 +91,11 @@ QVector<Waypoint> POI::points(const QList<WaypointItem*> &list)
 	qreal min[2], max[2];
 
 	for (int i = 0; i < list.count(); i++) {
-		const QPointF &p = list.at(i)->waypoint().coordinates();
-		min[0] = p.x() - _radius;
-		min[1] = p.y() - _radius;
-		max[0] = p.x() + _radius;
-		max[1] = p.y() + _radius;
+		const Coordinates &p = list.at(i)->waypoint().coordinates();
+		min[0] = p.lon() - _radius;
+		min[1] = p.lat() - _radius;
+		max[0] = p.lon() + _radius;
+		max[1] = p.lat() + _radius;
 		_tree.Search(min, max, cb, &set);
 	}
 
@@ -210,11 +115,11 @@ QVector<Waypoint> POI::points(const QList<Waypoint> &list) const
 	qreal min[2], max[2];
 
 	for (int i = 0; i < list.count(); i++) {
-		const QPointF &p = list.at(i).coordinates();
-		min[0] = p.x() - _radius;
-		min[1] = p.y() - _radius;
-		max[0] = p.x() + _radius;
-		max[1] = p.y() + _radius;
+		const Coordinates &p = list.at(i).coordinates();
+		min[0] = p.lon() - _radius;
+		min[1] = p.lat() - _radius;
+		max[0] = p.lon() + _radius;
+		max[1] = p.lat() + _radius;
 		_tree.Search(min, max, cb, &set);
 	}
 
@@ -242,10 +147,10 @@ void POI::enableFile(const QString &fileName, bool enable)
 			continue;
 
 		for (int j = idx.start; j <= idx.end; j++) {
-			const QPointF &p = _data.at(j).coordinates();
+			const Coordinates &p = _data.at(j).coordinates();
 			qreal c[2];
-			c[0] = p.x();
-			c[1] = p.y();
+			c[0] = p.lon();
+			c[1] = p.lat();
 			_tree.Insert(c, c, j);
 		}
 	}

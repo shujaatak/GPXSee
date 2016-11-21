@@ -5,15 +5,6 @@
 #define GRAPH_WIDTH 1
 #define HOVER_WIDTH 2
 
-static bool hasTime(const Graph &graph)
-{
-	for (int i = 0; i < graph.count(); i++)
-		if (std::isnan(graph.at(i).t()))
-			return false;
-
-	return true;
-}
-
 GraphItem::GraphItem(const Graph &graph, QGraphicsItem *parent)
   : QGraphicsObject(parent)
 {
@@ -24,7 +15,6 @@ GraphItem::GraphItem(const Graph &graph, QGraphicsItem *parent)
 	_type = Distance;
 	_graph = graph;
 	_sx = 1.0; _sy = 1.0;
-	_time = hasTime(_graph);
 
 	updatePath();
 	updateBounds();
@@ -126,13 +116,13 @@ qreal GraphItem::distanceAtTime(qreal time)
 void GraphItem::emitSliderPositionChanged(qreal pos)
 {
 	if (_type == Time) {
-		if (_time) {
-			if (pos <= _graph.last().t())
+		if (_graph.hasTime()) {
+			if (pos >= _graph.first().t() && pos <= _graph.last().t())
 				emit sliderPositionChanged(distanceAtTime(pos));
 			else
-				emit sliderPositionChanged(_graph.last().s() + 1);
+				emit sliderPositionChanged(NAN);
 		} else
-			emit sliderPositionChanged(_graph.last().s() + 1);
+			emit sliderPositionChanged(NAN);
 	} else
 		emit sliderPositionChanged(pos);
 }
@@ -165,7 +155,7 @@ void GraphItem::updatePath()
 {
 	_path = QPainterPath();
 
-	if (_type == Time && !_time)
+	if (_type == Time && !_graph.hasTime())
 		return;
 
 	_path.moveTo(_graph.first().x(_type) * _sx, -_graph.first().y() * _sy);
@@ -175,7 +165,7 @@ void GraphItem::updatePath()
 
 void GraphItem::updateBounds()
 {
-	if (_type == Time && !_time) {
+	if (_type == Time && !_graph.hasTime()) {
 		_bounds = QRectF();
 		return;
 	}

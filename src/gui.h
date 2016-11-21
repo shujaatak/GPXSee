@@ -89,6 +89,7 @@ private:
 	void createStatusBar();
 	void createPathView();
 	void createGraphTabs();
+	void createBrowser();
 
 	bool openPOIFile(const QString &fileName);
 	bool loadFile(const QString &fileName);
@@ -97,16 +98,18 @@ private:
 	void updateWindowTitle();
 	void updateNavigationActions();
 	void updateGraphTabs();
-	void updateTrackView();
+	void updatePathView();
 
 	void setUnits(Units units);
 	void setGraphType(GraphType type);
 
-	qreal distance();
-	qreal time();
+	qreal distance() const;
+	qreal time() const;
 	int mapIndex(const QString &name);
 	void readSettings();
 	void writeSettings();
+
+	const QString fileFormats() const;
 
 	void keyPressEvent(QKeyEvent *event);
 	void closeEvent(QCloseEvent *event);

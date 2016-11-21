@@ -1,55 +1,30 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include <QXmlStreamReader>
-#include <QVector>
+#include <QString>
 #include <QList>
-#include "trackpoint.h"
+#include <QFile>
+#include "trackdata.h"
+#include "routedata.h"
 #include "waypoint.h"
 
 
 class Parser
 {
 public:
-	Parser(QList<QVector<Trackpoint> > &tracks,
-	  QList<QVector<Waypoint> > &routes, QList<Waypoint> &waypoints)
-	  : _tracks(tracks), _routes(routes), _waypoints(waypoints)
-	  {_track = 0; _route = 0;}
+	Parser(QList<TrackData> &tracks, QList<RouteData> &routes,
+	  QList<Waypoint> &waypoints) : _tracks(tracks), _routes(routes),
+	  _waypoints(waypoints) {}
+	virtual ~Parser() {}
 
-	bool loadFile(QIODevice *device);
-	QString errorString() const {return _reader.errorString();}
-	int errorLine() const {return _reader.lineNumber();}
+	virtual bool loadFile(QFile *file) = 0;
+	virtual QString errorString() const = 0;
+	virtual int errorLine() const = 0;
 
-private:
-	enum DataType {
-		Name, Description, Elevation, Time, Geoidheight, Speed, HeartRate,
-		Temperature
-	};
-
-	bool parse();
-	void gpx();
-	void track();
-	void trackpoints();
-	void routepoints();
-	void tpExtension();
-	void extensions();
-	void trackpointData();
-	void routepointData();
-	void waypointData();
-
-	void handleWaypointAttributes(const QXmlStreamAttributes &attr);
-	void handleWaypointData(DataType type, const QString &value);
-	void handleTrackpointAttributes(const QXmlStreamAttributes &attr);
-	void handleTrackpointData(DataType type, const QString &value);
-	void handleRoutepointAttributes(const QXmlStreamAttributes &attr);
-	void handleRoutepointData(DataType type, const QString &value);
-
-	QXmlStreamReader _reader;
-	QList<QVector<Trackpoint> > &_tracks;
-	QList<QVector<Waypoint> > &_routes;
+protected:
+	QList<TrackData> &_tracks;
+	QList<RouteData> &_routes;
 	QList<Waypoint> &_waypoints;
-	QVector<Trackpoint> *_track;
-	QVector<Waypoint> *_route;
 };
 
 #endif // PARSER_H

@@ -9,7 +9,7 @@
 #include "palette.h"
 #include "waypoint.h"
 
-class GPX;
+class Data;
 class POI;
 class Map;
 class Track;
@@ -28,7 +28,7 @@ public:
 	PathView(QWidget *parent = 0);
 	~PathView();
 
-	QList<PathItem*> loadGPX(const GPX &gpx);
+	QList<PathItem*> loadData(const Data &data);
 
 	void setPOI(POI *poi);
 	void setMap(Map *map);
@@ -65,23 +65,19 @@ private:
 	void loadPOI();
 	void clearPOI();
 
-	QRectF trackBoundingRect() const;
-	QRectF routeBoundingRect() const;
-	QRectF waypointBoundingRect() const;
-	qreal trackScale() const;
-	qreal routeScale() const;
-	qreal waypointScale() const;
-	qreal mapScale(int zoom) const;
-	void rescale(qreal scale);
+	qreal contentsScale() const;
+	QRectF contentsSceneRect() const;
+	void rescale(int zoom);
 	void rescale();
-	void zoom(int z, const QPointF &pos);
+	void zoom(int z, const QPoint &pos);
 	void updatePOIVisibility();
 
+	void mouseDoubleClickEvent(QMouseEvent *event);
 	void wheelEvent(QWheelEvent *event);
 	void keyPressEvent(QKeyEvent *event);
 	void drawBackground(QPainter *painter, const QRectF &rect);
-	void resizeEvent(QResizeEvent *e);
-	void paintEvent(QPaintEvent *e);
+	void resizeEvent(QResizeEvent *event);
+	void paintEvent(QPaintEvent *event);
 
 	QGraphicsScene *_scene;
 	ScaleItem *_mapScale;
@@ -90,14 +86,13 @@ private:
 	QList<WaypointItem*> _waypoints;
 	QHash<Waypoint, WaypointItem*> _pois;
 
+	int _zoom;
+	QRectF _tr, _rr, _wr;
+	QPointF _wp;
+
 	Map *_map;
 	POI *_poi;
-
 	Palette _palette;
-
-	qreal _scale;
-	int _zoom;
-
 	Units _units;
 
 	bool _showTracks;

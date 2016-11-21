@@ -1,5 +1,5 @@
 TARGET = GPXSee
-VERSION = 2.20
+VERSION = 3.2
 QT += core \
     gui \
     network
@@ -8,11 +8,8 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += printsupport
 HEADERS += src/config.h \
     src/icons.h \
     src/gui.h \
-    src/gpx.h \
-    src/parser.h \
     src/poi.h \
     src/rtree.h \
-    src/ll.h \
     src/axisitem.h \
     src/keys.h \
     src/slideritem.h \
@@ -53,13 +50,30 @@ HEADERS += src/config.h \
     src/graph.h \
     src/pathitem.h \
     src/pathview.h \
-    src/griditem.h
+    src/griditem.h \
+    src/data.h \
+    src/gpxparser.h \
+    src/tcxparser.h \
+    src/parser.h \
+    src/csvparser.h \
+    src/coordinates.h \
+    src/tile.h \
+    src/rd.h \
+    src/wgs84.h \
+    src/kmlparser.h \
+    src/trackdata.h \
+    src/routedata.h \
+    src/fitparser.h \
+    src/format.h \
+    src/path.h \
+    src/assert.h \
+    src/cadencegraph.h \
+    src/powergraph.h \
+    src/igcparser.h \
+    src/nmeaparser.h
 SOURCES += src/main.cpp \
     src/gui.cpp \
-    src/gpx.cpp \
-    src/parser.cpp \
     src/poi.cpp \
-    src/ll.cpp \
     src/axisitem.cpp \
     src/slideritem.cpp \
     src/markeritem.cpp \
@@ -93,19 +107,43 @@ SOURCES += src/main.cpp \
     src/graphitem.cpp \
     src/pathitem.cpp \
     src/pathview.cpp \
-    src/griditem.cpp
+    src/griditem.cpp \
+    src/data.cpp \
+    src/gpxparser.cpp \
+    src/tcxparser.cpp \
+    src/csvparser.cpp \
+    src/coordinates.cpp \
+    src/kmlparser.cpp \
+    src/fitparser.cpp \
+    src/format.cpp \
+    src/graph.cpp \
+    src/cadencegraph.cpp \
+    src/powergraph.cpp \
+    src/igcparser.cpp \
+    src/path.cpp \
+    src/nmeaparser.cpp
 RESOURCES += gpxsee.qrc
 TRANSLATIONS = lang/gpxsee_cs.ts
 macx {
     ICON = icons/gpxsee.icns
     QMAKE_INFO_PLIST = Info.plist
     APP_RESOURCES.files = icons/gpx.icns \
+        icons/tcx.icns \
+        icons/kml.icns \
+        icons/fit.icns \
+        icons/igc.icns \
+        icons/nmea.icns \
         pkg/maps.txt
     APP_RESOURCES.path = Contents/Resources
     QMAKE_BUNDLE_DATA += APP_RESOURCES
 }
 win32 {
     RC_ICONS = icons/gpxsee.ico \
-        icons/gpx.ico
+        icons/gpx.ico \
+        icons/tcx.ico \
+        icons/kml.ico \
+        icons/fit.ico \
+        icons/igc.ico \
+        icons/nmea.ico
 }
 DEFINES += APP_VERSION=\\\"$$VERSION\\\"

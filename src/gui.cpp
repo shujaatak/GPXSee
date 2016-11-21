@@ -26,20 +26,22 @@
 #include "icons.h"
 #include "keys.h"
 #include "settings.h"
-#include "gpx.h"
+#include "data.h"
 #include "map.h"
 #include "maplist.h"
 #include "elevationgraph.h"
 #include "speedgraph.h"
 #include "heartrategraph.h"
 #include "temperaturegraph.h"
+#include "cadencegraph.h"
+#include "powergraph.h"
 #include "pathview.h"
 #include "trackinfo.h"
 #include "filebrowser.h"
 #include "cpuarch.h"
 #include "exportdialog.h"
 #include "graphtab.h"
-#include "misc.h"
+#include "format.h"
 #include "gui.h"
 
 
@@ -55,8 +57,7 @@ GUI::GUI(QWidget *parent) : QMainWindow(parent)
 	createMenus();
 	createToolBars();
 
-	_browser = new FileBrowser(this);
-	_browser->setFilter(QStringList("*.gpx"));
+	createBrowser();
 
 	QSplitter *splitter = new QSplitter();
 	splitter->setOrientation(Qt::Vertical);
@@ -82,7 +83,7 @@ GUI::GUI(QWidget *parent) : QMainWindow(parent)
 	_sliderPos = 0;
 
 	updateGraphTabs();
-	updateTrackView();
+	updatePathView();
 	updateStatusBarInfo();
 
 	readSettings();
@@ -103,6 +104,24 @@ GUI::~GUI()
 		if (_graphTabWidget->indexOf(_tabs.at(i)) < 0)
 			delete _tabs.at(i);
 	}
+}
+
+const QString GUI::fileFormats() const
+{
+	return tr("Supported files (*.csv *.fit *.gpx *.igc *.kml *.nmea *.tcx)")
+	  + ";;" + tr("CSV files (*.csv)") + ";;" + tr("FIT files (*.fit)") + ";;"
+	  + tr("GPX files (*.gpx)") + ";;" + tr("IGC files (*.igc)") + ";;"
+	  + tr("KML files (*.kml)") + ";;" + tr("NMEA files (*.nmea)") + ";;"
+	  + tr("TCX files (*.tcx)") + ";;" + tr("All files (*)");
+}
+
+void GUI::createBrowser()
+{
+	QStringList filter;
+	filter << "*.gpx" << "*.tcx" << "*.kml" << "*.fit" << "*.csv" << "*.igc"
+	  << "*.nmea";
+	_browser = new FileBrowser(this);
+	_browser->setFilter(filter);
 }
 
 void GUI::loadMaps()
@@ -497,6 +516,8 @@ void GUI::createGraphTabs()
 	_tabs.append(new ElevationGraph);
 	_tabs.append(new SpeedGraph);
 	_tabs.append(new HeartRateGraph);
+	_tabs.append(new CadenceGraph);
+	_tabs.append(new PowerGraph);
 	_tabs.append(new TemperatureGraph);
 
 	for (int i = 0; i < _tabs.count(); i++)
@@ -593,7 +614,7 @@ void GUI::dataSources()
 void GUI::openFile()
 {
 	QStringList files = QFileDialog::getOpenFileNames(this, tr("Open file"),
-	  QString(), tr("GPX files (*.gpx);;All files (*)"));
+	  QString(), fileFormats());
 	QStringList list = files;
 
 	for (QStringList::Iterator it = list.begin(); it != list.end(); it++)
@@ -612,59 +633,61 @@ bool GUI::openFile(const QString &fileName)
 		_browser->setCurrent(fileName);
 		_fileActionGroup->setEnabled(true);
 		_navigationActionGroup->setEnabled(true);
+
+		updateNavigationActions();
+		updateStatusBarInfo();
+		updateWindowTitle();
+		updateGraphTabs();
+		updatePathView();
 	} else {
 		if (_files.isEmpty())
 			_fileActionGroup->setEnabled(false);
 		ret = false;
 	}
 
-	updateNavigationActions();
-	updateStatusBarInfo();
-	updateWindowTitle();
-	updateGraphTabs();
-	updateTrackView();
-
 	return ret;
 }
 
 bool GUI::loadFile(const QString &fileName)
 {
-	GPX gpx;
+	Data data;
 	QList<PathItem*> paths;
 
-	if (gpx.loadFile(fileName)) {
-		paths = _pathView->loadGPX(gpx);
+	if (data.loadFile(fileName)) {
+		paths = _pathView->loadData(data);
 		for (int i = 0; i < _tabs.count(); i++)
-			_tabs.at(i)->loadGPX(gpx, paths);
-		updateGraphTabs();
-		_pathView->setHidden(false);
+			_tabs.at(i)->loadData(data, paths);
 
-		for (int i = 0; i < gpx.tracks().count(); i++) {
-			_trackDistance += gpx.tracks().at(i)->distance();
-			_time += gpx.tracks().at(i)->time();
-			const QDate &date = gpx.tracks().at(i)->date().date();
+		for (int i = 0; i < data.tracks().count(); i++) {
+			_trackDistance += data.tracks().at(i)->distance();
+			_time += data.tracks().at(i)->time();
+			const QDate &date = data.tracks().at(i)->date().date();
 			if (_dateRange.first.isNull() || _dateRange.first > date)
 				_dateRange.first = date;
 			if (_dateRange.second.isNull() || _dateRange.second < date)
 				_dateRange.second = date;
 		}
-		_trackCount += gpx.tracks().count();
+		_trackCount += data.tracks().count();
 
-		for (int i = 0; i < gpx.routes().count(); i++)
-			_routeDistance += gpx.routes().at(i)->distance();
-		_routeCount += gpx.routes().count();
+		for (int i = 0; i < data.routes().count(); i++)
+			_routeDistance += data.routes().at(i)->distance();
+		_routeCount += data.routes().count();
 
-		_waypointCount += gpx.waypoints().count();
+		_waypointCount += data.waypoints().count();
 
 		return true;
 	} else {
-		QString error = fileName + QString("\n\n")
-		  + tr("Error loading GPX file:\n%1").arg(gpx.errorString())
-		  + QString("\n");
-		if (gpx.errorLine())
-			error.append(tr("Line: %1").arg(gpx.errorLine()));
+		updateNavigationActions();
+		updateStatusBarInfo();
+		updateWindowTitle();
+		updateGraphTabs();
+		updatePathView();
 
-		QMessageBox::critical(this, tr("Error"), error);
+		QString error = tr("Error loading data file:") + "\n\n"
+		  + fileName + "\n\n" + data.errorString();
+		if (data.errorLine())
+			error.append("\n" + tr("Line: %1").arg(data.errorLine()));
+		QMessageBox::critical(this, APP_NAME, error);
 		return false;
 	}
 }
@@ -672,9 +695,7 @@ bool GUI::loadFile(const QString &fileName)
 void GUI::openPOIFile()
 {
 	QStringList files = QFileDialog::getOpenFileNames(this, tr("Open POI file"),
-	  QString(), tr("All POI files (*.gpx *.csv)") + ";;"
-	  + tr("GPX files (*.gpx)") + ";;" + tr("CSV files (*.csv)") + ";;"
-	  + tr("All files (*)"));
+	  QString(), fileFormats());
 	QStringList list = files;
 
 	for (QStringList::Iterator it = list.begin(); it != list.end(); it++)
@@ -687,12 +708,11 @@ bool GUI::openPOIFile(const QString &fileName)
 		return false;
 
 	if (!_poi->loadFile(fileName)) {
-		QString error = fileName + QString("\n\n")
-		  + tr("Error loading POI file:\n%1").arg(_poi->errorString())
-		  + QString("\n");
+		QString error = tr("Error loading POI file:") + "\n\n"
+		  + fileName + "\n\n" + _poi->errorString();
 		if (_poi->errorLine())
-			error.append(tr("Line: %1").arg(_poi->errorLine()));
-		QMessageBox::critical(this, tr("Error"), error);
+			error.append("\n" + tr("Line: %1").arg(_poi->errorLine()));
+		QMessageBox::critical(this, APP_NAME, error);
 
 		return false;
 	} else {
@@ -777,9 +797,9 @@ void GUI::plot(QPrinter *printer)
 		info.insert(tr("Waypoints"), QString::number(_waypointCount));
 
 	if (d > 0)
-		info.insert(tr("Distance"), ::distance(d, units));
+		info.insert(tr("Distance"), Format::distance(d, units));
 	if (t > 0)
-		info.insert(tr("Time"), ::timeSpan(t));
+		info.insert(tr("Time"), Format::timeSpan(t));
 
 
 	ratio = p.paintEngine()->paintDevice()->logicalDpiX() / SCREEN_DPI;
@@ -831,7 +851,7 @@ void GUI::reloadFile()
 	updateStatusBarInfo();
 	updateWindowTitle();
 	updateGraphTabs();
-	updateTrackView();
+	updatePathView();
 	if (_files.isEmpty())
 		_fileActionGroup->setEnabled(false);
 	else
@@ -865,7 +885,7 @@ void GUI::closeAll()
 	updateStatusBarInfo();
 	updateWindowTitle();
 	updateGraphTabs();
-	updateTrackView();
+	updatePathView();
 }
 
 void GUI::showMap(bool show)
@@ -964,19 +984,18 @@ void GUI::updateStatusBarInfo()
 	else if (_files.count() == 1)
 		_fileNameLabel->setText(_files.at(0));
 	else
-		_fileNameLabel->setText(tr("%1 files", "", _files.count())
-		  .arg(_files.count()));
+		_fileNameLabel->setText(tr("%n files", "", _files.count()));
 
 	qreal d = distance();
 	Units units = _imperialUnitsAction->isChecked() ? Imperial : Metric;
 	if (d > 0)
-		_distanceLabel->setText(::distance(distance(), units));
+		_distanceLabel->setText(Format::distance(distance(), units));
 	else
 		_distanceLabel->clear();
 
 	qreal t = time();
 	if (t > 0)
-		_timeLabel->setText(::timeSpan(time()));
+		_timeLabel->setText(Format::timeSpan(time()));
 	else
 		_timeLabel->clear();
 }
@@ -1082,7 +1101,7 @@ void GUI::updateGraphTabs()
 	}
 }
 
-void GUI::updateTrackView()
+void GUI::updatePathView()
 {
 	_pathView->setHidden(!(_pathView->trackCount() + _pathView->routeCount()
 	  + _pathView->waypointCount()));
@@ -1381,7 +1400,7 @@ int GUI::mapIndex(const QString &name)
 	return 0;
 }
 
-qreal GUI::distance()
+qreal GUI::distance() const
 {
 	qreal dist = 0;
 
@@ -1393,7 +1412,7 @@ qreal GUI::distance()
 	return dist;
 }
 
-qreal GUI::time()
+qreal GUI::time() const
 {
 	return (_showTracksAction->isChecked()) ? _time : 0;
 }

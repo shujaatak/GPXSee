@@ -4,7 +4,7 @@
 ; The name of the installer
 Name "GPXSee"
 ; Program version
-!define VERSION "2.20"
+!define VERSION "3.2"
 
 ; The file to write
 OutFile "GPXSee-${VERSION}.exe"
@@ -21,8 +21,13 @@ InstallDirRegKey HKLM "Software\GPXSee" "Install_Dir"
 
 ; Registry key for uninstaller
 !define REGENTRY "Software\Microsoft\Windows\CurrentVersion\Uninstall\GPXSee"
-; GPX file type registry entry
+; File types registry entries
 !define REGGPX "GPXSee.gpx"
+!define REGTCX "GPXSee.tcx"
+!define REGKML "GPXSee.kml"
+!define REGFIT "GPXSee.fit"
+!define REGIGC "GPXSee.igc"
+!define REGNMEA "GPXSee.nmea"
 
 ; Start menu page configuration
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT "HKLM" 
@@ -62,18 +67,6 @@ Section "GPXSee (required)" SEC_APP
   ; Put the files there
   File "gpxsee.exe"
   File "maps.txt"
-  
-  ; Write the installation path into the registry
-  WriteRegStr HKLM SOFTWARE\GPXSee "Install_Dir" "$INSTDIR"
-  
-  ; Write the uninstall keys for Windows
-  WriteRegStr HKLM "${REGENTRY}" "DisplayName" "GPXSee"
-  WriteRegStr HKLM "${REGENTRY}" "Publisher" "Martin Tuma"
-  WriteRegStr HKLM "${REGENTRY}" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKLM "${REGENTRY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
-  WriteRegDWORD HKLM "${REGENTRY}" "NoModify" 1
-  WriteRegDWORD HKLM "${REGENTRY}" "NoRepair" 1
-  WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; Create start menu entry and add links
   SetShellVarContext all
@@ -83,11 +76,48 @@ Section "GPXSee (required)" SEC_APP
     CreateShortCut "$SMPROGRAMS\$StartMenuFolder\GPXSee.lnk" "$INSTDIR\gpxsee.exe"
   !insertmacro MUI_STARTMENU_WRITE_END
 
-  ; Associate .gpx files
+  ; Create the uninstaller
+  WriteUninstaller "$INSTDIR\uninstall.exe" 
+
+  ; Write the installation path into the registry
+  DetailPrint "Registering application..."
+  WriteRegStr HKLM SOFTWARE\GPXSee "Install_Dir" "$INSTDIR"
+
+  ; Write the uninstall keys for Windows
+  WriteRegStr HKLM "${REGENTRY}" "DisplayName" "GPXSee"
+  WriteRegStr HKLM "${REGENTRY}" "Publisher" "Martin Tuma"
+  WriteRegStr HKLM "${REGENTRY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKLM "${REGENTRY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+  WriteRegDWORD HKLM "${REGENTRY}" "NoModify" 1
+  WriteRegDWORD HKLM "${REGENTRY}" "NoRepair" 1
+
+  ; Associate file formats
+  DetailPrint "Associating file types..."
   WriteRegStr HKCR ".gpx" "" "${REGGPX}"
   WriteRegStr HKCR "${REGGPX}" ""  "GPS Exchange Format"
   WriteRegStr HKCR "${REGGPX}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,1"
   WriteRegStr HKCR "${REGGPX}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+  WriteRegStr HKCR ".tcx" "" "${REGTCX}"
+  WriteRegStr HKCR "${REGTCX}" ""  "Training Center XML"
+  WriteRegStr HKCR "${REGTCX}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,2"
+  WriteRegStr HKCR "${REGTCX}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+  WriteRegStr HKCR ".kml" "" "${REGKML}"
+  WriteRegStr HKCR "${REGKML}" ""  "Keyhole Markup Language"
+  WriteRegStr HKCR "${REGKML}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,3"
+  WriteRegStr HKCR "${REGKML}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+  WriteRegStr HKCR ".fit" "" "${REGFIT}"
+  WriteRegStr HKCR "${REGFIT}" ""  "Flexible and Interoperable Data Transfer"
+  WriteRegStr HKCR "${REGFIT}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,4"
+  WriteRegStr HKCR "${REGFIT}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+  WriteRegStr HKCR ".igc" "" "${REGIGC}"
+  WriteRegStr HKCR "${REGIGC}" ""  "Flight Recorder Data Format"
+  WriteRegStr HKCR "${REGIGC}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,5"
+  WriteRegStr HKCR "${REGIGC}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+  WriteRegStr HKCR ".nmea" "" "${REGNMEA}"
+  WriteRegStr HKCR "${REGNMEA}" ""  "NMEA 0183 data"
+  WriteRegStr HKCR "${REGNMEA}\DefaultIcon" "" "$INSTDIR\GPXSee.exe,6"
+  WriteRegStr HKCR "${REGNMEA}\shell\open\command" "" "$\"$INSTDIR\GPXSee.exe$\" $\"%1$\""
+
   System::Call 'shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'
 
 SectionEnd
@@ -149,6 +179,16 @@ Section "Uninstall"
   ; Remove GPX file association
   DeleteRegKey HKCR "${REGGPX}"
   DeleteRegKey HKCR ".gpx"
+  DeleteRegKey HKCR "${REGTCX}"
+  DeleteRegKey HKCR ".tcx"
+  DeleteRegKey HKCR "${REGKML}"
+  DeleteRegKey HKCR ".kml"
+  DeleteRegKey HKCR "${REGFIT}"
+  DeleteRegKey HKCR ".fit"
+  DeleteRegKey HKCR "${REGIGC}"
+  DeleteRegKey HKCR ".igc"
+  DeleteRegKey HKCR "${REGNMEA}"
+  DeleteRegKey HKCR ".nmea"
   System::Call 'shell32.dll::SHChangeNotify(i, i, i, i) v (0x08000000, 0, 0, 0)'  
 
 SectionEnd

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <QApplication>
 #include <QCursor>
 #include <QPainter>
@@ -71,14 +72,48 @@ void PathItem::setUnits(enum Units units)
 	_units = units;
 }
 
+QPointF PathItem::position(qreal x) const
+{
+	int low = 0;
+	int high = _distance.count() - 1;
+	int mid = 0;
+
+
+	Q_ASSERT(_distance.count() == _path.elementCount());
+	Q_ASSERT(high > low);
+	Q_ASSERT(x >= _distance.at(low) && x <= _distance.at(high));
+
+	while (low <= high) {
+		mid = low + ((high - low) / 2);
+		qreal val = _distance.at(mid);
+		if (val > x)
+			high = mid - 1;
+		else if (val < x)
+			low = mid + 1;
+		else
+			return _path.elementAt(mid);
+	}
+
+	QLineF l;
+	qreal p1, p2;
+	if (_distance.at(mid) < x) {
+		l = QLineF(_path.elementAt(mid), _path.elementAt(mid+1));
+		p1 = _distance.at(mid); p2 = _distance.at(mid+1);
+	} else {
+		l = QLineF(_path.elementAt(mid-1), _path.elementAt(mid));
+		p1 = _distance.at(mid-1); p2 = _distance.at(mid);
+	}
+
+	return l.pointAt((x - p1) / (p2 - p1));
+}
+
 void PathItem::moveMarker(qreal distance)
 {
-	if (distance > _distance)
-		_marker->setVisible(false);
-	else {
+	if (distance >= _distance.first() && distance <= _distance.last()) {
 		_marker->setVisible(true);
-		_marker->setPos(_path.pointAtPercent(distance / _distance));
-	}
+		_marker->setPos(position(distance));
+	} else
+		_marker->setVisible(false);
 }
 
 void PathItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event)

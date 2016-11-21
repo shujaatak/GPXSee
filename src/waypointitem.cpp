@@ -1,8 +1,7 @@
 #include <QApplication>
 #include <QPainter>
 #include "config.h"
-#include "ll.h"
-#include "misc.h"
+#include "format.h"
 #include "tooltip.h"
 #include "waypointitem.h"
 
@@ -17,10 +16,10 @@ QString WaypointItem::toolTip()
 	if (!_waypoint.name().isEmpty() && !_showLabel)
 		tt.insert(qApp->translate("WaypointItem", "Name"), _waypoint.name());
 	tt.insert(qApp->translate("WaypointItem", "Coordinates"),
-	  ::coordinates(_waypoint.coordinates()));
+	  Format::coordinates(_waypoint.coordinates()));
 	if (!std::isnan(_waypoint.elevation()))
 		tt.insert(qApp->translate("WaypointItem", "Elevation"),
-		  ::elevation(_waypoint.elevation() - _waypoint.geoidHeight(), _units));
+		  Format::elevation(_waypoint.elevation(), _units));
 	if (!_waypoint.timestamp().isNull())
 		tt.insert(qApp->translate("WaypointItem", "Date"),
 		  _waypoint.timestamp().toString(Qt::SystemLocaleShortDate));
@@ -39,8 +38,8 @@ WaypointItem::WaypointItem(const Waypoint &waypoint, QGraphicsItem *parent)
 	_hover = false;
 
 	_waypoint = waypoint;
-	_coordinates = ll2mercator(QPointF(waypoint.coordinates().x(),
-	  -waypoint.coordinates().y()));
+	QPointF p = waypoint.coordinates().toMercator();
+	_coordinates = QPointF(p.x(), -p.y());
 
 	updateShape();
 

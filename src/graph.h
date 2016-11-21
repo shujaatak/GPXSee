@@ -2,6 +2,7 @@
 #define GRAPH_H
 
 #include <QVector>
+#include <QDebug>
 #include <cmath>
 
 enum GraphType {Distance, Time};
@@ -27,6 +28,25 @@ private:
 	qreal _y;
 };
 
-typedef QVector<GraphPoint> Graph;
+Q_DECLARE_TYPEINFO(GraphPoint, Q_PRIMITIVE_TYPE);
+QDebug operator<<(QDebug dbg, const GraphPoint &point);
+
+
+class Graph : public QVector<GraphPoint>
+{
+public:
+	Graph() : QVector<GraphPoint>() {_time = true;}
+	void append(const GraphPoint &p)
+	{
+		if (std::isnan(p.t()))
+			_time = false;
+		QVector<GraphPoint>::append(p);
+	}
+
+	bool hasTime() const {return _time;}
+
+private:
+	bool _time;
+};
 
 #endif // GRAPH_H

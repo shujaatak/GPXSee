@@ -1,35 +1,33 @@
 #ifndef WAYPOINT_H
 #define WAYPOINT_H
 
-#include <QPointF>
 #include <QString>
 #include <QDateTime>
 #include <QHash>
 #include <QDebug>
 #include <cmath>
+#include "coordinates.h"
 
 class Waypoint
 {
 public:
-	Waypoint() {_elevation = NAN; _geoidHeight = 0;}
-	Waypoint(const QPointF &coordinates)
-	  : _coordinates(coordinates) {_elevation = NAN; _geoidHeight = 0;}
+	Waypoint() {_elevation = NAN;}
+	Waypoint(const Coordinates &coordinates) : _coordinates(coordinates)
+	  {_elevation = NAN;}
 
-	const QPointF &coordinates() const {return _coordinates;}
+	const Coordinates &coordinates() const {return _coordinates;}
 	const QString &name() const {return _name;}
 	const QString &description() const {return _description;}
 	const QDateTime &timestamp() const {return _timestamp;}
 	qreal elevation() const {return _elevation;}
-	qreal geoidHeight() const {return _geoidHeight;}
 
-	void setCoordinates(const QPointF &coordinates)
+	void setCoordinates(const Coordinates &coordinates)
 	  {_coordinates = coordinates;}
 	void setName(const QString &name) {_name = name;}
 	void setDescription(const QString &description)
 	  {_description = description;}
 	void setTimestamp(const QDateTime &timestamp) {_timestamp = timestamp;}
 	void setElevation(qreal elevation) {_elevation = elevation;}
-	void setGeoidHeight(qreal geoidHeight) {_geoidHeight = geoidHeight;}
 
 	bool hasElevation() const {return !std::isnan(_elevation);}
 
@@ -38,12 +36,11 @@ public:
 	  && this->_coordinates == other._coordinates;}
 
 private:
-	QPointF _coordinates;
+	Coordinates _coordinates;
 	QString _name;
 	QString _description;
 	QDateTime _timestamp;
 	qreal _elevation;
-	qreal _geoidHeight;
 };
 
 inline uint qHash(const Waypoint &key)
@@ -52,5 +49,7 @@ inline uint qHash(const Waypoint &key)
 }
 
 QDebug operator<<(QDebug dbg, const Waypoint &Waypoint);
+
+Q_DECLARE_TYPEINFO(Waypoint, Q_MOVABLE_TYPE);
 
 #endif // WAYPOINT_H

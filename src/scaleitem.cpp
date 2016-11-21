@@ -1,22 +1,28 @@
 #include <QPainter>
 #include "config.h"
-#include "ll.h"
+#include "rd.h"
+#include "wgs84.h"
+#include "tile.h"
 #include "misc.h"
 #include "scaleitem.h"
 
 
 #define BORDER_WIDTH   1
-#define SCALE_WIDTH  132
-#define SCALE_HEIGHT 5
-#define SEGMENTS 3
+#define SCALE_WIDTH    132
+#define SCALE_HEIGHT   5
+#define SEGMENTS       3
+#define PADDING        4
 
-#define PADDING 4
-
+static qreal zoom2resolution(int zoom, qreal y)
+{
+	return (WGS84_RADIUS * 2 * M_PI / Tile::size()
+	  * cos(2 * atan(exp(deg2rad(y))) - M_PI/2)) / pow(2.0, zoom);
+}
 
 ScaleItem::ScaleItem(QGraphicsItem *parent) : QGraphicsItem(parent)
 {
 	_units = Metric;
-	_zoom = ZOOM_MIN;
+	_zoom = 0;
 	_lat = 0;
 
 #ifndef Q_OS_MAC
@@ -61,7 +67,7 @@ void ScaleItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
 	for (int i = 0; i <= SEGMENTS; i++) {
 		QString label = QString::number(_length * i);
 		br = fm.tightBoundingRect(label);
-		painter->drawText(_width * i - br.width()/2, br.height(), label);
+		painter->drawText(_width * i - br.width()/2, br.height() + 1, label);
 	}
 	painter->drawText(_width * SEGMENTS + PADDING, SCALE_HEIGHT + PADDING
 	  + br.height() + fm.descent(), units());
