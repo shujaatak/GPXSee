@@ -110,7 +110,8 @@ bool IGCParser::readHRecord(const char *line, int len)
 		return false;
 	}
 
-	_date = QDate(2000 + y, m, d);
+	_date = QDate(y + 2000 < QDate::currentDate().year() ? 2000 + y : 1900 + y,
+	  m, d);
 	if (!_date.isValid()) {
 		_errorString = "Invalid date";
 		return false;
@@ -149,7 +150,7 @@ bool IGCParser::readBRecord(const char *line, int len)
 
 
 	if (time < _time)
-		_date.addDays(1);
+		_date = _date.addDays(1);
 	_time = time;
 
 	Trackpoint t(Coordinates(lon, lat));

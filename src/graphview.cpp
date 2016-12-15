@@ -3,6 +3,12 @@
 #include <QMouseEvent>
 #include <QPaintEngine>
 #include <QPaintDevice>
+#if QT_VERSION < QT_VERSION_CHECK(5, 4, 0)
+#include <QGLWidget>
+#else // QT 5.4
+#include <QOpenGLWidget>
+#endif // QT 5.4
+#include <QSysInfo>
 #include "config.h"
 #include "axisitem.h"
 #include "slideritem.h"
@@ -23,22 +29,26 @@ GraphView::GraphView(QWidget *parent)
 	_scene = new QGraphicsScene();
 	setScene(_scene);
 
+	setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+	setRenderHint(QPainter::Antialiasing, true);
 	setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
 	_xAxis = new AxisItem(AxisItem::X);
-	_xAxis->setZValue(1.0);
+	_xAxis->setZValue(2.0);
 	_yAxis = new AxisItem(AxisItem::Y);
-	_yAxis->setZValue(1.0);
+	_yAxis->setZValue(2.0);
 	_slider = new SliderItem();
-	_slider->setZValue(2.0);
+	_slider->setZValue(3.0);
 	_sliderInfo = new SliderInfoItem(_slider);
-	_sliderInfo->setZValue(2.0);
+	_sliderInfo->setZValue(3.0);
 	_info = new InfoItem();
 	_grid = new GridItem();
 
 	connect(_slider, SIGNAL(positionChanged(const QPointF&)), this,
 	  SLOT(emitSliderPositionChanged(const QPointF&)));
+
+	_width = 1;
 
 	_xScale = 1;
 	_yScale = 1;
@@ -169,7 +179,8 @@ void GraphView::loadGraph(const Graph &graph, PathItem *path, int id)
 	GraphItem *gi = new GraphItem(graph);
 	gi->setGraphType(_graphType);
 	gi->setId(id);
-	gi->setColor(_palette.color());
+	gi->setColor(_palette.nextColor());
+	gi->setWidth(_width);
 
 	connect(this, SIGNAL(sliderPositionChanged(qreal)), gi,
 	  SLOT(emitSliderPositionChanged(qreal)));
@@ -430,4 +441,36 @@ void GraphView::addInfo(const QString &key, const QString &value)
 void GraphView::clearInfo()
 {
 	_info->clear();
+}
+
+void GraphView::setPalette(const Palette &palette)
+{
+	_palette = palette;
+	_palette.reset();
+
+	for (int i = 0; i < _graphs.count(); i++)
+		_graphs.at(i)->setColor(_palette.nextColor());
+}
+
+void GraphView::setGraphWidth(int width)
+{
+	_width = width;
+
+	for (int i = 0; i < _graphs.count(); i++)
+		_graphs.at(i)->setWidth(width);
+}
+
+void GraphView::useOpenGL(bool use)
+{
+	if (use) {
+#ifdef Q_OS_WIN32
+		if (QSysInfo::WindowsVersion >= QSysInfo::WV_VISTA)
+#endif // Q_OS_WIN32
+#if QT_VERSION < QT_VERSION_CHECK(5, 4, 0)
+		setViewport(new QGLWidget);
+#else // QT 5.4
+		setViewport(new QOpenGLWidget);
+#endif // QT 5.4
+	} else
+		setViewport(new QWidget);
 }
