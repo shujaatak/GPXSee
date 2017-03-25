@@ -3,15 +3,14 @@
 
 #include <QList>
 #include <QString>
-#include <QObject>
 
+class QObject;
 class Map;
 
 class MapList
 {
 public:
-	static QList<Map*> load(QObject *parent = 0,
-	  const QString &fileName = QString());
+	static QList<Map*> load(const QString &fileName, QObject *parent = 0);
 };
 
 #endif // MAPLIST_H

@@ -11,6 +11,8 @@
 #define WINDOW_POS_DEFAULT                QPoint(10, 10)
 
 #define SETTINGS_SETTINGS_GROUP           "Settings"
+#define TIME_TYPE_SETTING                 "timeType"
+#define TIME_TYPE_DEFAULT                 Total
 #define UNITS_SETTING                     "units"
 #define UNITS_DEFAULT                     (IMPERIAL_UNITS() ? Imperial : Metric)
 #define SHOW_TOOLBARS_SETTING             "toolbar"
@@ -100,6 +102,8 @@
 #define PRINT_DISTANCE_DEFAULT            true
 #define PRINT_TIME_SETTING                "printTime"
 #define PRINT_TIME_DEFAULT                true
+#define PRINT_MOVING_TIME_SETTING         "printMovingTime"
+#define PRINT_MOVING_TIME_DEFAULT         false
 #define PRINT_ITEM_COUNT_SETTING          "printItemCount"
 #define PRINT_ITEM_COUNT_DEFAULT          true
 #define SEPARATE_GRAPH_PAGE_SETTING       "separateGraphPage"

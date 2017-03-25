@@ -7,6 +7,7 @@
 #include <QDate>
 #include <QPrinter>
 #include "units.h"
+#include "timetype.h"
 #include "graph.h"
 #include "poi.h"
 #include "exportdialog.h"
@@ -30,7 +31,7 @@ class GUI : public QMainWindow
 	Q_OBJECT
 
 public:
-	GUI(QWidget *parent = 0);
+	GUI();
 	~GUI();
 
 	bool openFile(const QString &fileName);
@@ -46,7 +47,6 @@ private slots:
 	void reloadFile();
 	void openPOIFile();
 	void closePOIFiles();
-	void showMap(bool show);
 	void showGraphs(bool show);
 	void showGraphGrids(bool show);
 	void showToolbars(bool show);
@@ -67,6 +67,8 @@ private slots:
 	void last();
 	void first();
 
+	void setTotalTime() {setTimeType(Total);}
+	void setMovingTime() {setTimeType(Moving);}
 	void setMetricUnits() {setUnits(Metric);}
 	void setImperialUnits() {setUnits(Imperial);}
 	void setDistanceGraph() {setGraphType(Distance);}
@@ -102,11 +104,15 @@ private:
 	void updateGraphTabs();
 	void updatePathView();
 
+	TimeType timeType() const;
+	Units units() const;
+	void setTimeType(TimeType type);
 	void setUnits(Units units);
 	void setGraphType(GraphType type);
 
 	qreal distance() const;
 	qreal time() const;
+	qreal movingTime() const;
 	int mapIndex(const QString &name);
 	void readSettings();
 	void writeSettings();
@@ -154,6 +160,8 @@ private:
 	QAction *_firstAction;
 	QAction *_metricUnitsAction;
 	QAction *_imperialUnitsAction;
+	QAction *_totalTimeAction;
+	QAction *_movingTimeAction;
 	QAction *_nextMapAction;
 	QAction *_prevMapAction;
 	QAction *_showTracksAction;
@@ -180,14 +188,15 @@ private:
 
 	FileBrowser *_browser;
 	QList<QString> _files;
-	Map *_currentMap;
 
+	Map *_map;
 	int _trackCount;
 	int _routeCount;
 	int _waypointCount;
 	qreal _trackDistance;
 	qreal _routeDistance;
 	qreal _time;
+	qreal _movingTime;
 	DateRange _dateRange;
 	QString _pathName;
 

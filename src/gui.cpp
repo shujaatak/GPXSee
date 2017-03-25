@@ -28,6 +28,8 @@
 #include "data.h"
 #include "map.h"
 #include "maplist.h"
+#include "mapdir.h"
+#include "emptymap.h"
 #include "elevationgraph.h"
 #include "speedgraph.h"
 #include "heartrategraph.h"
@@ -43,7 +45,7 @@
 #include "gui.h"
 
 
-GUI::GUI(QWidget *parent) : QMainWindow(parent)
+GUI::GUI()
 {
 	loadMaps();
 	loadPOIs();
@@ -78,6 +80,7 @@ GUI::GUI(QWidget *parent) : QMainWindow(parent)
 	_trackDistance = 0;
 	_routeDistance = 0;
 	_time = 0;
+	_movingTime = 0;
 
 	_sliderPos = 0;
 
@@ -116,10 +119,21 @@ void GUI::createBrowser()
 
 void GUI::loadMaps()
 {
+	QList<Map*> online, offline;
+
 	if (QFile::exists(USER_MAP_FILE))
-		_maps = MapList::load(this, USER_MAP_FILE);
+		online = MapList::load(USER_MAP_FILE, this);
 	else
-		_maps = MapList::load(this, GLOBAL_MAP_FILE);
+		online = MapList::load(GLOBAL_MAP_FILE, this);
+
+	if (QFile::exists(USER_MAP_DIR))
+		offline = MapDir::load(USER_MAP_DIR, this);
+	else
+		offline = MapDir::load(GLOBAL_MAP_DIR, this);
+
+	_maps = online + offline;
+
+	_map = _maps.isEmpty() ? new EmptyMap(this) : _maps.first();
 }
 
 void GUI::loadPOIs()
@@ -135,8 +149,15 @@ void GUI::loadPOIs()
 	else
 		list = globalDir.entryInfoList(QStringList(), QDir::Files);
 
-	for (int i = 0; i < list.size(); ++i)
-		_poi->loadFile(list.at(i).absoluteFilePath());
+	for (int i = 0; i < list.size(); ++i) {
+		if (!_poi->loadFile(list.at(i).absoluteFilePath())) {
+			qWarning("Error loading POI file: %s: %s\n",
+			  qPrintable(list.at(i).fileName()),
+			  qPrintable(_poi->errorString()));
+			if (_poi->errorLine())
+				qWarning("Line: %d\n", _poi->errorLine());
+		}
+	}
 }
 
 void GUI::createMapActions()
@@ -270,7 +291,8 @@ void GUI::createActions()
 	  this);
 	_showMapAction->setCheckable(true);
 	_showMapAction->setShortcut(SHOW_MAP_SHORTCUT);
-	connect(_showMapAction, SIGNAL(triggered(bool)), this, SLOT(showMap(bool)));
+	connect(_showMapAction, SIGNAL(triggered(bool)), _pathView,
+	  SLOT(showMap(bool)));
 	addAction(_showMapAction);
 	_clearMapCacheAction = new QAction(tr("Clear tile cache"), this);
 	connect(_clearMapCacheAction, SIGNAL(triggered()), this,
@@ -347,6 +369,18 @@ void GUI::createActions()
 	_showToolbarsAction->setCheckable(true);
 	connect(_showToolbarsAction, SIGNAL(triggered(bool)), this,
 	  SLOT(showToolbars(bool)));
+	ag = new QActionGroup(this);
+	ag->setExclusive(true);
+	_totalTimeAction = new QAction(tr("Total time"), this);
+	_totalTimeAction->setCheckable(true);
+	_totalTimeAction->setActionGroup(ag);
+	connect(_totalTimeAction, SIGNAL(triggered()), this,
+	  SLOT(setTotalTime()));
+	_movingTimeAction = new QAction(tr("Moving time"), this);
+	_movingTimeAction->setCheckable(true);
+	_movingTimeAction->setActionGroup(ag);
+	connect(_movingTimeAction, SIGNAL(triggered()), this,
+	  SLOT(setMovingTime()));
 	ag = new QActionGroup(this);
 	ag->setExclusive(true);
 	_metricUnitsAction = new QAction(tr("Metric"), this);
@@ -440,6 +474,9 @@ void GUI::createMenus()
 	dataMenu->addAction(_showWaypointsAction);
 
 	QMenu *settingsMenu = menuBar()->addMenu(tr("Settings"));
+	QMenu *timeMenu = settingsMenu->addMenu(tr("Time"));
+	timeMenu->addAction(_totalTimeAction);
+	timeMenu->addAction(_movingTimeAction);
 	QMenu *unitsMenu = settingsMenu->addMenu(tr("Units"));
 	unitsMenu->addAction(_metricUnitsAction);
 	unitsMenu->addAction(_imperialUnitsAction);
@@ -482,15 +519,13 @@ void GUI::createToolBars()
 
 void GUI::createPathView()
 {
-	_pathView = new PathView(this);
+	_pathView = new PathView(_map, _poi, this);
 	_pathView->setSizePolicy(QSizePolicy(QSizePolicy::Ignored,
 	  QSizePolicy::Expanding));
 	_pathView->setMinimumHeight(200);
 #ifdef Q_OS_WIN32
 	_pathView->setFrameShape(QFrame::NoFrame);
 #endif // Q_OS_WIN32
-
-	_pathView->setPOI(_poi);
 }
 
 void GUI::createGraphTabs()
@@ -537,15 +572,13 @@ void GUI::about()
 	QMessageBox msgBox(this);
 
 	msgBox.setWindowTitle(tr("About GPXSee"));
-	msgBox.setText(QString("<h2>") + QString(APP_NAME) + QString("</h2><p>")
-	  + QString("<p>") + tr("Version ") + APP_VERSION + QString(" (")
-	  + CPU_ARCH + QString(", Qt ") + QString(QT_VERSION_STR)
-	  + QString(")</p>"));
-	msgBox.setInformativeText(QString("<table width=\"300\"><tr><td>")
+	msgBox.setText("<h2>" + QString(APP_NAME) + "</h2><p><p>" + tr("Version ")
+	  + APP_VERSION + " (" + CPU_ARCH + ", Qt " + QT_VERSION_STR + ")</p>");
+	msgBox.setInformativeText("<table width=\"300\"><tr><td>"
 	  + tr("GPXSee is distributed under the terms of the GNU General Public "
 	  "License version 3. For more info about GPXSee visit the project "
-	  "homepage at ") + QString("<a href=\"" APP_HOMEPAGE "\">" APP_HOMEPAGE
-	  "</a>.</td></tr></table>"));
+	  "homepage at ") + "<a href=\"" + APP_HOMEPAGE + "\">" + APP_HOMEPAGE
+	  + "</a>.</td></tr></table>");
 
 	QIcon icon = msgBox.windowIcon();
 	QSize size = icon.actualSize(QSize(64, 64));
@@ -559,20 +592,20 @@ void GUI::keys()
 	QMessageBox msgBox(this);
 
 	msgBox.setWindowTitle(tr("Keyboard controls"));
-	msgBox.setText(QString("<h3>") + tr("Keyboard controls") + QString("</h3>"));
+	msgBox.setText("<h3>" + tr("Keyboard controls") + "</h3>");
 	msgBox.setInformativeText(
-	  QString("<div><table width=\"300\"><tr><td>") + tr("Next file")
-	  + QString("</td><td><i>SPACE</i></td></tr><tr><td>") + tr("Previous file")
-	  + QString("</td><td><i>BACKSPACE</i></td></tr><tr><td>")
-	  + tr("First file") + QString("</td><td><i>HOME</i></td></tr><tr><td>")
-	  + tr("Last file") + QString("</td><td><i>END</i></td></tr><tr><td>")
-	  + tr("Append modifier") + QString("</td><td><i>SHIFT</i></td></tr>"
-	  "<tr><td></td><td></td></tr><tr><td>")
-	  + tr("Next map") + QString("</td><td><i>")
-	  + _nextMapAction->shortcut().toString() + QString("</i></td></tr><tr><td>")
-	  + tr("Previous map") + QString("</td><td><i>")
-	  + _prevMapAction->shortcut().toString() + QString("</i></td></tr>"
-	  "</table></div>"));
+	  "<div><table width=\"300\"><tr><td>" + tr("Next file")
+	  + "</td><td><i>" + QKeySequence(NEXT_KEY).toString()
+	  + "</i></td></tr><tr><td>" + tr("Previous file")
+	  + "</td><td><i>" + QKeySequence(PREV_KEY).toString()
+	  + "</i></td></tr><tr><td>" + tr("First file") + "</td><td><i>"
+	  + QKeySequence(FIRST_KEY).toString() + "</i></td></tr><tr><td>"
+	  + tr("Last file") + "</td><td><i>" + QKeySequence(LAST_KEY).toString()
+	  + "</i></td></tr><tr><td>" + tr("Append modifier")
+	  + "</td><td><i>SHIFT</i></td></tr><tr><td></td><td></td></tr><tr><td>"
+	  + tr("Next map") + "</td><td><i>" + NEXT_MAP_SHORTCUT.toString()
+	  + "</i></td></tr><tr><td>" + tr("Previous map") + "</td><td><i>"
+	  + PREV_MAP_SHORTCUT.toString() + "</i></td></tr></table></div>");
 
 	msgBox.exec();
 }
@@ -582,23 +615,23 @@ void GUI::dataSources()
 	QMessageBox msgBox(this);
 
 	msgBox.setWindowTitle(tr("Data sources"));
-	msgBox.setText(QString("<h3>") + tr("Data sources") + QString("</h3>"));
+	msgBox.setText("<h3>" + tr("Data sources") + "</h3>");
 	msgBox.setInformativeText(
-	  QString("<h4>") + tr("Map sources") + QString("</h4><p>")
+	  "<h4>" + tr("Map sources") + "</h4><p>"
 	  + tr("Map (tiles) source URLs are read on program startup from the "
 		"following file:")
-		+ QString("</p><p><code>") + USER_MAP_FILE + QString("</code></p><p>")
+		+ "</p><p><code>" + USER_MAP_FILE + "</code></p><p>"
 		+ tr("The file format is one map entry per line, consisting of the map "
 		  "name and tiles URL delimited by a TAB character. The tile X and Y "
 		  "coordinates are replaced with $x and $y in the URL and the zoom "
 		  "level is replaced with $z. An example map file could look like:")
-		+ QString("</p><p><code>Map1	http://tile.server.com/map/$z/$x/$y.png"
-		  "<br/>Map2	http://mapserver.org/map/$z-$x-$y</code></p>")
+		+ "</p><p><code>Map1	http://tile.server.com/map/$z/$x/$y.png"
+		  "<br/>Map2	http://mapserver.org/map/$z-$x-$y</code></p>"
 
-	  + QString("<h4>") + tr("POIs") + QString("</h4><p>")
+	  + "<h4>" + tr("POIs") + "</h4><p>"
 	  + tr("To make GPXSee load a POI file automatically on startup, add "
 		"the file to the following directory:")
-		+ QString("</p><p><code>") + USER_POI_DIR + QString("</code></p>")
+		+ "</p><p><code>" + USER_POI_DIR + "</code></p>"
 	);
 
 	msgBox.exec();
@@ -654,6 +687,7 @@ bool GUI::loadFile(const QString &fileName)
 		for (int i = 0; i < data.tracks().count(); i++) {
 			_trackDistance += data.tracks().at(i)->distance();
 			_time += data.tracks().at(i)->time();
+			_movingTime += data.tracks().at(i)->movingTime();
 			const QDate &date = data.tracks().at(i)->date().date();
 			if (_dateRange.first.isNull() || _dateRange.first > date)
 				_dateRange.first = date;
@@ -672,7 +706,7 @@ bool GUI::loadFile(const QString &fileName)
 			if (data.tracks().count() == 1 && !data.routes().count())
 				_pathName = data.tracks().first()->name();
 			else if (data.routes().count() == 1 && !data.tracks().count())
-				_pathName = data.routes().first()->routeData().name();
+				_pathName = data.routes().first()->name();
 		} else
 			_pathName = QString();
 
@@ -815,9 +849,9 @@ void GUI::plot(QPrinter *printer)
 	QPainter p(printer);
 	TrackInfo info;
 	qreal ih, gh, mh, ratio;
-	Units units = _imperialUnitsAction->isChecked() ? Imperial : Metric;
 	qreal d = distance();
 	qreal t = time();
+	qreal tm = movingTime();
 
 	if (!_pathName.isNull() && _options.printName)
 		info.insert(tr("Name"), _pathName);
@@ -844,9 +878,11 @@ void GUI::plot(QPrinter *printer)
 	}
 
 	if (d > 0 && _options.printDistance)
-		info.insert(tr("Distance"), Format::distance(d, units));
+		info.insert(tr("Distance"), Format::distance(d, units()));
 	if (t > 0 && _options.printTime)
 		info.insert(tr("Time"), Format::timeSpan(t));
+	if (tm > 0 && _options.printMovingTime)
+		info.insert(tr("Moving time"), Format::timeSpan(tm));
 
 
 	ratio = p.paintEngine()->paintDevice()->logicalDpiX() / SCREEN_DPI;
@@ -901,6 +937,7 @@ void GUI::reloadFile()
 	_trackDistance = 0;
 	_routeDistance = 0;
 	_time = 0;
+	_movingTime = 0;
 	_dateRange = DateRange(QDate(), QDate());
 	_pathName = QString();
 
@@ -935,6 +972,7 @@ void GUI::closeFiles()
 	_trackDistance = 0;
 	_routeDistance = 0;
 	_time = 0;
+	_movingTime = 0;
 	_dateRange = DateRange(QDate(), QDate());
 	_pathName = QString();
 
@@ -956,14 +994,6 @@ void GUI::closeAll()
 	updateWindowTitle();
 	updateGraphTabs();
 	updatePathView();
-}
-
-void GUI::showMap(bool show)
-{
-	if (show)
-		_pathView->setMap(_currentMap);
-	else
-		_pathView->setMap(0);
 }
 
 void GUI::showGraphs(bool show)
@@ -1043,55 +1073,60 @@ void GUI::showGraphGrids(bool show)
 
 void GUI::clearMapCache()
 {
-	_currentMap->clearCache();
+	_map->clearCache();
 	_pathView->redraw();
 }
 
 void GUI::updateStatusBarInfo()
 {
 	if (_files.count() == 0)
-		_fileNameLabel->setText(tr("No GPX files loaded"));
+		_fileNameLabel->setText(tr("No files loaded"));
 	else if (_files.count() == 1)
 		_fileNameLabel->setText(_files.at(0));
 	else
 		_fileNameLabel->setText(tr("%n files", "", _files.count()));
 
-	qreal d = distance();
-	Units units = _imperialUnitsAction->isChecked() ? Imperial : Metric;
-	if (d > 0)
-		_distanceLabel->setText(Format::distance(distance(), units));
+	if (distance() > 0)
+		_distanceLabel->setText(Format::distance(distance(), units()));
 	else
 		_distanceLabel->clear();
 
-	qreal t = time();
-	if (t > 0)
-		_timeLabel->setText(Format::timeSpan(time()));
-	else
+	if (time() > 0) {
+		if (_movingTimeAction->isChecked()) {
+			_timeLabel->setText(Format::timeSpan(movingTime())
+			  + "<sub>M</sub>");
+			_timeLabel->setToolTip(Format::timeSpan(time()));
+		} else {
+			_timeLabel->setText(Format::timeSpan(time()));
+			_timeLabel->setToolTip(Format::timeSpan(movingTime())
+			  + "<sub>M</sub>");
+		}
+	} else {
 		_timeLabel->clear();
+		_timeLabel->setToolTip(QString());
+	}
 }
 
 void GUI::updateWindowTitle()
 {
 	if (_files.count() == 1)
-		setWindowTitle(QFileInfo(_files.at(0)).fileName()
-		  + QString(" - " APP_NAME));
+		setWindowTitle(QFileInfo(_files.at(0)).fileName() + " - " + APP_NAME);
 	else
 		setWindowTitle(APP_NAME);
 }
 
 void GUI::mapChanged(int index)
 {
-	_currentMap = _maps.at(index);
-
-	if (_showMapAction->isChecked())
-		_pathView->setMap(_currentMap);
+	_map = _maps.at(index);
+	_pathView->setMap(_map);
 }
 
 void GUI::nextMap()
 {
 	if (_maps.count() < 2)
 		return;
-	int next = (_maps.indexOf(_currentMap) + 1) % _maps.count();
+
+	int next = (_maps.indexOf(_map) + 1) % _maps.count();
 	_mapActions.at(next)->setChecked(true);
 	mapChanged(next);
 }
@@ -1100,7 +1135,8 @@ void GUI::prevMap()
 {
 	if (_maps.count() < 2)
 		return;
-	int prev = (_maps.indexOf(_currentMap) + _maps.count() - 1) % _maps.count();
+
+	int prev = (_maps.indexOf(_map) + _maps.count() - 1) % _maps.count();
 	_mapActions.at(prev)->setChecked(true);
 	mapChanged(prev);
 }
@@ -1175,6 +1211,14 @@ void GUI::updatePathView()
 {
 	_pathView->setHidden(!(_pathView->trackCount() + _pathView->routeCount()
 	  + _pathView->waypointCount()));
+}
+
+void GUI::setTimeType(TimeType type)
+{
+	for (int i = 0; i <_tabs.count(); i++)
+		_tabs.at(i)->setTimeType(type);
+
+	updateStatusBarInfo();
 }
 
 void GUI::setUnits(Units units)
@@ -1312,6 +1356,10 @@ void GUI::writeSettings()
 	settings.endGroup();
 
 	settings.beginGroup(SETTINGS_SETTINGS_GROUP);
+	if ((_movingTimeAction->isChecked() ? Moving : Total) !=
+	  TIME_TYPE_DEFAULT)
+		settings.setValue(TIME_TYPE_SETTING, _movingTimeAction->isChecked()
+	  ? Moving : Total);
 	if ((_imperialUnitsAction->isChecked() ? Imperial : Metric) !=
 	  UNITS_DEFAULT)
 		settings.setValue(UNITS_SETTING, _imperialUnitsAction->isChecked()
@@ -1322,8 +1370,7 @@ void GUI::writeSettings()
 	settings.endGroup();
 
 	settings.beginGroup(MAP_SETTINGS_GROUP);
-	if (_currentMap)
-		settings.setValue(CURRENT_MAP_SETTING, _currentMap->name());
+	settings.setValue(CURRENT_MAP_SETTING, _map->name());
 	if (_showMapAction->isChecked() != SHOW_MAP_DEFAULT)
 		settings.setValue(SHOW_MAP_SETTING, _showMapAction->isChecked());
 	settings.endGroup();
@@ -1422,6 +1469,8 @@ void GUI::writeSettings()
 		settings.setValue(PRINT_DISTANCE_SETTING, _options.printDistance);
 	if (_options.printTime != PRINT_TIME_DEFAULT)
 		settings.setValue(PRINT_TIME_SETTING, _options.printTime);
+	if (_options.printMovingTime != PRINT_MOVING_TIME_DEFAULT)
+		settings.setValue(PRINT_MOVING_TIME_SETTING, _options.printMovingTime);
 	if (_options.printItemCount != PRINT_ITEM_COUNT_DEFAULT)
 		settings.setValue(PRINT_ITEM_COUNT_SETTING, _options.printItemCount);
 	if (_options.separateGraphPage != SEPARATE_GRAPH_PAGE_DEFAULT)
@@ -1440,6 +1489,14 @@ void GUI::readSettings()
 	settings.endGroup();
 
 	settings.beginGroup(SETTINGS_SETTINGS_GROUP);
+	if (settings.value(TIME_TYPE_SETTING, TIME_TYPE_DEFAULT).toInt()
+	  == Moving) {
+		setTimeType(Moving);
+		_movingTimeAction->setChecked(true);
+	} else {
+		setTimeType(Total);
+		_totalTimeAction->setChecked(true);
+	}
 	if (settings.value(UNITS_SETTING, UNITS_DEFAULT).toInt() == Imperial) {
 		setUnits(Imperial);
 		_imperialUnitsAction->setChecked(true);
@@ -1459,11 +1516,9 @@ void GUI::readSettings()
 	if (_maps.count()) {
 		int index = mapIndex(settings.value(CURRENT_MAP_SETTING).toString());
 		_mapActions.at(index)->setChecked(true);
-		_currentMap = _maps.at(index);
-		if (_showMapAction->isChecked())
-			_pathView->setMap(_currentMap);
-	} else
-		_currentMap = 0;
+		_map = _maps.at(index);
+		_pathView->setMap(_map);
+	}
 	settings.endGroup();
 
 	settings.beginGroup(GRAPH_SETTINGS_GROUP);
@@ -1591,6 +1646,8 @@ void GUI::readSettings()
 	  PRINT_DISTANCE_DEFAULT).toBool();
 	_options.printTime = settings.value(PRINT_TIME_SETTING, PRINT_TIME_DEFAULT)
 	  .toBool();
+	_options.printMovingTime = settings.value(PRINT_MOVING_TIME_SETTING,
+	  PRINT_MOVING_TIME_DEFAULT).toBool();
 	_options.printItemCount = settings.value(PRINT_ITEM_COUNT_SETTING,
 	  PRINT_ITEM_COUNT_DEFAULT).toBool();
 	_options.separateGraphPage = settings.value(SEPARATE_GRAPH_PAGE_SETTING,
@@ -1628,6 +1685,11 @@ int GUI::mapIndex(const QString &name)
 	return 0;
 }
 
+Units GUI::units() const
+{
+	return _imperialUnitsAction->isChecked() ? Imperial : Metric;
+}
+
 qreal GUI::distance() const
 {
 	qreal dist = 0;
@@ -1643,4 +1705,9 @@ qreal GUI::distance() const
 qreal GUI::time() const
 {
 	return (_showTracksAction->isChecked()) ? _time : 0;
+}
+
+qreal GUI::movingTime() const
+{
+	return (_showTracksAction->isChecked()) ? _movingTime : 0;
 }

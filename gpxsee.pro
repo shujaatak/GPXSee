@@ -1,5 +1,5 @@
 TARGET = GPXSee
-VERSION = 3.5
+VERSION = 4.0
 QT += core \
     gui \
     network
@@ -22,6 +22,7 @@ HEADERS += src/config.h \
     src/sliderinfoitem.h \
     src/filebrowser.h \
     src/map.h \
+    src/onlinemap.h \
     src/maplist.h \
     src/downloader.h \
     src/units.h \
@@ -76,7 +77,13 @@ HEADERS += src/config.h \
     src/optionsdialog.h \
     src/colorbox.h \
     src/stylecombobox.h \
-    src/opengl.h
+    src/opengl.h \
+    src/timetype.h \
+    src/emptymap.h \
+    src/offlinemap.h \
+    src/mapdir.h \
+    src/matrix.h \
+    src/tar.h
 SOURCES += src/main.cpp \
     src/gui.cpp \
     src/poi.cpp \
@@ -88,7 +95,7 @@ SOURCES += src/main.cpp \
     src/speedgraph.cpp \
     src/sliderinfoitem.cpp \
     src/filebrowser.cpp \
-    src/map.cpp \
+    src/onlinemap.cpp \
     src/maplist.cpp \
     src/downloader.cpp \
     src/scaleitem.cpp \
@@ -130,9 +137,15 @@ SOURCES += src/main.cpp \
     src/nmeaparser.cpp \
     src/optionsdialog.cpp \
     src/colorbox.cpp \
-    src/stylecombobox.cpp
+    src/stylecombobox.cpp \
+    src/emptymap.cpp \
+    src/offlinemap.cpp \
+    src/mapdir.cpp \
+    src/matrix.cpp \
+    src/tar.cpp
 RESOURCES += gpxsee.qrc
-TRANSLATIONS = lang/gpxsee_cs.ts
+TRANSLATIONS = lang/gpxsee_cs.ts \
+    lang/gpxsee_sv.ts
 macx {
     ICON = icons/gpxsee.icns
     QMAKE_INFO_PLIST = Info.plist

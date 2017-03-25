@@ -3,10 +3,11 @@
 #include <QWheelEvent>
 #include <QSysInfo>
 #include "opengl.h"
-#include "rd.h"
+#include "misc.h"
 #include "poi.h"
 #include "data.h"
 #include "map.h"
+#include "emptymap.h"
 #include "trackitem.h"
 #include "routeitem.h"
 #include "waypointitem.h"
@@ -14,54 +15,8 @@
 #include "pathview.h"
 
 
-#define ZOOM_MAX      18
-#define ZOOM_MIN      3
 #define MARGIN        10.0
 #define SCALE_OFFSET  7
-
-static QPoint mercator2tile(const QPointF &m, int z)
-{
-	QPoint tile;
-
-	tile.setX((int)(floor((m.x() + 180.0) / 360.0 * pow(2.0, z))));
-	tile.setY((int)(floor((1.0 - (m.y() / 180.0)) / 2.0 * pow(2.0, z))));
-
-	return tile;
-}
-
-static QPointF tile2mercator(const QPoint &tile, int z)
-{
-	Coordinates m;
-
-	m.setLon(tile.x() / pow(2.0, z) * 360.0 - 180);
-	qreal n = M_PI - 2.0 * M_PI * tile.y() / pow(2.0, z);
-	m.setLat(rad2deg(atan(0.5 * (exp(n) - exp(-n)))));
-
-	return m.toMercator();
-}
-
-static int scale2zoom(qreal scale)
-{
-	int zoom = (int)log2(360.0/(scale * (qreal)Tile::size()));
-
-	if (zoom < ZOOM_MIN)
-		return ZOOM_MIN;
-	if (zoom > ZOOM_MAX)
-		return ZOOM_MAX;
-
-	return zoom;
-}
-
-qreal mapScale(int zoom)
-{
-	return ((360.0/(qreal)(1<<zoom))/(qreal)Tile::size());
-}
-
-static QRectF qrectf(const QPointF &p1, const QPointF &p2)
-{
-	return QRectF(QPointF(qMin(p1.x(), p2.x()), qMin(p1.y(), p2.y())),
-	  QPointF(qMax(p1.x(), p2.x()), qMax(p1.y(), p2.y())));
-}
 
 static void unite(QRectF &rect, const QPointF &p)
 {
@@ -75,16 +30,12 @@ static void unite(QRectF &rect, const QPointF &p)
 		rect.setTop(p.y());
 }
 
-static QRectF scaled(const QRectF &rect, qreal factor)
-{
-	return QRectF(QPointF(rect.left() * factor, rect.top() * factor),
-	  QSizeF(rect.width() * factor, rect.height() * factor));
-}
-
-
-PathView::PathView(QWidget *parent)
+PathView::PathView(Map *map, POI *poi, QWidget *parent)
 	: QGraphicsView(parent)
 {
+	Q_ASSERT(map != 0);
+	Q_ASSERT(poi != 0);
+
 	_scene = new QGraphicsScene(this);
 	setScene(_scene);
 	setCacheMode(QGraphicsView::CacheBackground);
@@ -98,12 +49,14 @@ PathView::PathView(QWidget *parent)
 	_mapScale = new ScaleItem();
 	_mapScale->setZValue(2.0);
 
-	_zoom = ZOOM_MAX;
-	_map = 0;
-	_poi = 0;
+	_map = map;
+	_poi = poi;
+	connect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
+	connect(_poi, SIGNAL(pointsChanged()), this, SLOT(updatePOI()));
 
 	_units = Metric;
 
+	_showMap = true;
 	_showTracks = true;
 	_showRoutes = true;
 	_showWaypoints = true;
@@ -118,6 +71,9 @@ PathView::PathView(QWidget *parent)
 	_routeStyle = Qt::DashLine;
 
 	_plot = false;
+
+	setSceneRect(_map->bounds());
+	_res = _map->resolution(_scene->sceneRect().center());
 }
 
 PathView::~PathView()
@@ -133,19 +89,16 @@ PathItem *PathView::addTrack(const Track &track)
 		return 0;
 	}
 
-	TrackItem *ti = new TrackItem(track);
+	TrackItem *ti = new TrackItem(track, _map);
 	_tracks.append(ti);
 	_tr |= ti->path().boundingRect();
-	_zoom = scale2zoom(contentsScale());
-	ti->setScale(1.0/mapScale(_zoom));
 	ti->setColor(_palette.nextColor());
 	ti->setWidth(_trackWidth);
 	ti->setStyle(_trackStyle);
 	ti->setVisible(_showTracks);
 	_scene->addItem(ti);
 
-	if (_poi)
-		addPOI(_poi->points(ti));
+	addPOI(_poi->points(ti->path()));
 
 	return ti;
 }
@@ -157,11 +110,9 @@ PathItem *PathView::addRoute(const Route &route)
 		return 0;
 	}
 
-	RouteItem *ri = new RouteItem(route);
+	RouteItem *ri = new RouteItem(route, _map);
 	_routes.append(ri);
 	_rr |= ri->path().boundingRect();
-	_zoom = scale2zoom(contentsScale());
-	ri->setScale(1.0/mapScale(_zoom));
 	ri->setColor(_palette.nextColor());
 	ri->setWidth(_routeWidth);
 	ri->setStyle(_routeStyle);
@@ -170,48 +121,33 @@ PathItem *PathView::addRoute(const Route &route)
 	ri->showWaypointLabels(_showWaypointLabels);
 	_scene->addItem(ri);
 
-	if (_poi)
-		addPOI(_poi->points(ri));
+	addPOI(_poi->points(ri->path()));
 
 	return ri;
 }
 
 void PathView::addWaypoints(const QList<Waypoint> &waypoints)
 {
-	qreal scale = mapScale(_zoom);
-
 	for (int i = 0; i < waypoints.count(); i++) {
 		const Waypoint &w = waypoints.at(i);
 
-		WaypointItem *wi = new WaypointItem(w);
-		wi->setScale(1.0/scale);
+		WaypointItem *wi = new WaypointItem(w, _map);
+		_waypoints.append(wi);
+		Coordinates c = wi->waypoint().coordinates();
+		updateWaypointsBoundingRect(QPointF(c.lon(), c.lat()));
 		wi->setZValue(1);
 		wi->showLabel(_showWaypointLabels);
 		wi->setVisible(_showWaypoints);
 		_scene->addItem(wi);
-
-		if (_wr.isNull()) {
-			if (_wp.isNull())
-				_wp = wi->coordinates();
-			else
-				_wr = qrectf(_wp, wi->coordinates());
-		} else
-			unite(_wr, wi->coordinates());
-
-		_waypoints.append(wi);
 	}
 
-	if (_poi)
-		addPOI(_poi->points(waypoints));
-
-	_zoom = scale2zoom(contentsScale());
+	addPOI(_poi->points(waypoints));
 }
 
 QList<PathItem *> PathView::loadData(const Data &data)
 {
 	QList<PathItem *> paths;
-	int zoom = _zoom;
-
+	qreal scale = _map->zoom();
 
 	for (int i = 0; i < data.tracks().count(); i++)
 		paths.append(addTrack(*(data.tracks().at(i))));
@@ -222,47 +158,54 @@ QList<PathItem *> PathView::loadData(const Data &data)
 	if (_tracks.empty() && _routes.empty() && _waypoints.empty())
 		return paths;
 
-	if ((_tracks.size() + _routes.size() > 1 && _zoom < zoom)
-	  || (_waypoints.size() && _zoom < zoom))
-		rescale(_zoom);
+	if (mapScale() != scale)
+		rescale();
 	else
 		updatePOIVisibility();
 
-	QRectF sr = contentsSceneRect();
-	_scene->setSceneRect(sr);
-	centerOn(sr.center());
+	QPointF center = contentCenter();
+	centerOn(center);
 
-	_mapScale->setZoom(_zoom, -(sr.center().ry() * mapScale(_zoom)));
+	_res = _map->resolution(center);
+	_mapScale->setResolution(_res);
 	if (_mapScale->scene() != _scene)
 		_scene->addItem(_mapScale);
 
 	return paths;
 }
 
-qreal PathView::contentsScale() const
+void PathView::updateWaypointsBoundingRect(const QPointF &wp)
 {
-	QRectF br = _tr | _rr | _wr;
-
-	if (br.isNull())
-		return mapScale(ZOOM_MAX);
-
-	QPointF sc(br.width() / (viewport()->width() - MARGIN/2),
-	  br.height() / (viewport()->height() - MARGIN/2));
-
-	return qMax(sc.x(), sc.y());
+	if (_wr.isNull()) {
+		if (_wp.isNull())
+			_wp = wp;
+		else {
+			_wr = QRectF(_wp, wp).normalized();
+			_wp = QPointF();
+		}
+	} else
+		unite(_wr, wp);
 }
 
-QRectF PathView::contentsSceneRect() const
+qreal PathView::mapScale() const
 {
-	qreal scale = mapScale(_zoom);
-	QRectF br = scaled(_tr | _rr | _wr, 1.0/scale);
+	QRectF br = _tr | _rr | _wr;
+	if (!br.isNull() && !_wp.isNull())
+		unite(br, _wp);
+
+	return _map->zoomFit(viewport()->size() - QSize(MARGIN/2, MARGIN/2), br);
+}
+
+QPointF PathView::contentCenter() const
+{
+	QRectF br = _tr | _rr | _wr;
+	if (!br.isNull() && !_wp.isNull())
+		unite(br, _wp);
 
 	if (br.isNull())
-		return QRectF(QPointF(_wp.x() / scale - Tile::size()/2,
-		  _wp.y() /scale - Tile::size()/2), QSizeF(Tile::size(), Tile::size()));
+		return _map->ll2xy(_wp);
 	else
-		return br.adjusted(-Tile::size(), -Tile::size(), Tile::size(),
-		  Tile::size());
+		return _map->ll2xy(br.center());
 }
 
 void PathView::updatePOIVisibility()
@@ -286,23 +229,20 @@ void PathView::updatePOIVisibility()
 	}
 }
 
-void PathView::rescale(int zoom)
+void PathView::rescale()
 {
-	_zoom = zoom;
-	qreal scale = mapScale(zoom);
+	setSceneRect(_map->bounds());
 
 	for (int i = 0; i < _tracks.size(); i++)
-		_tracks.at(i)->setScale(1.0/scale);
-
+		_tracks.at(i)->setMap(_map);
 	for (int i = 0; i < _routes.size(); i++)
-		_routes.at(i)->setScale(1.0/scale);
-
+		_routes.at(i)->setMap(_map);
 	for (int i = 0; i < _waypoints.size(); i++)
-		_waypoints.at(i)->setScale(1.0/scale);
+		_waypoints.at(i)->setMap(_map);
 
 	QHash<Waypoint, WaypointItem*>::const_iterator it;
 	for (it = _pois.constBegin(); it != _pois.constEnd(); it++)
-		it.value()->setScale(1.0/scale);
+		it.value()->setMap(_map);
 
 	updatePOIVisibility();
 }
@@ -318,15 +258,40 @@ void PathView::setPalette(const Palette &palette)
 		_routes.at(i)->setColor(_palette.nextColor());
 }
 
+void PathView::setMap(Map *map)
+{
+	_map->unload();
+	disconnect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
+
+	_map = map;
+	_map->load();
+	connect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
+
+	mapScale();
+	setSceneRect(_map->bounds());
+
+	for (int i = 0; i < _tracks.size(); i++)
+		_tracks.at(i)->setMap(map);
+	for (int i = 0; i < _routes.size(); i++)
+		_routes.at(i)->setMap(map);
+	for (int i = 0; i < _waypoints.size(); i++)
+		_waypoints.at(i)->setMap(map);
+
+	QPointF center = contentCenter();
+	centerOn(center);
+
+	_res = _map->resolution(center);
+	_mapScale->setResolution(_res);
+
+	resetCachedContent();
+}
+
 void PathView::setPOI(POI *poi)
 {
-	if (_poi)
-		disconnect(_poi, SIGNAL(pointsChanged()), this, SLOT(updatePOI()));
+	disconnect(_poi, SIGNAL(pointsChanged()), this, SLOT(updatePOI()));
+	connect(poi, SIGNAL(pointsChanged()), this, SLOT(updatePOI()));
 
 	_poi = poi;
-
-	if (_poi)
-		connect(_poi, SIGNAL(pointsChanged()), this, SLOT(updatePOI()));
 
 	updatePOI();
 }
@@ -341,13 +306,10 @@ void PathView::updatePOI()
 	}
 	_pois.clear();
 
-	if (!_poi)
-		return;
-
 	for (int i = 0; i < _tracks.size(); i++)
-		addPOI(_poi->points(_tracks.at(i)));
+		addPOI(_poi->points(_tracks.at(i)->path()));
 	for (int i = 0; i < _routes.size(); i++)
-		addPOI(_poi->points(_routes.at(i)));
+		addPOI(_poi->points(_routes.at(i)->path()));
 	addPOI(_poi->points(_waypoints));
 
 	updatePOIVisibility();
@@ -355,16 +317,13 @@ void PathView::updatePOI()
 
 void PathView::addPOI(const QVector<Waypoint> &waypoints)
 {
-	qreal scale = mapScale(_zoom);
-
 	for (int i = 0; i < waypoints.size(); i++) {
 		const Waypoint &w = waypoints.at(i);
 
 		if (_pois.contains(w))
 			continue;
 
-		WaypointItem *pi = new WaypointItem(w);
-		pi->setScale(1.0/scale);
+		WaypointItem *pi = new WaypointItem(w, _map);
 		pi->setZValue(1);
 		pi->showLabel(_showPOILabels);
 		pi->setVisible(_showPOI);
@@ -372,19 +331,6 @@ void PathView::addPOI(const QVector<Waypoint> &waypoints)
 
 		_pois.insert(w, pi);
 	}
-}
-
-void PathView::setMap(Map *map)
-{
-	if (_map)
-		disconnect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
-
-	_map = map;
-
-	if (_map)
-		connect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
-
-	resetCachedContent();
 }
 
 void PathView::setUnits(enum Units units)
@@ -410,75 +356,67 @@ void PathView::redraw()
 	resetCachedContent();
 }
 
-void PathView::rescale()
+void PathView::zoom(const QPoint &pos, const Coordinates &c)
 {
-	int zoom = scale2zoom(contentsScale());
-
-	if (zoom != _zoom) {
-		rescale(zoom);
-		_mapScale->setZoom(zoom);
-	}
-}
-
-void PathView::zoom(int z, const QPoint &pos)
-{
-	if (_tracks.isEmpty() && _routes.isEmpty() && _waypoints.isEmpty())
-		return;
-
 	QPoint offset = pos - viewport()->rect().center();
-	QPointF spos = mapToScene(pos);
 
-	qreal os = mapScale(_zoom);
-	_zoom = z;
+	rescale();
 
-	rescale(_zoom);
+	QPointF center = _map->ll2xy(c) - offset;
+	centerOn(center);
 
-	QRectF sr = contentsSceneRect();
-	_scene->setSceneRect(sr);
-
-	if (sr.width() < viewport()->size().width()
-	  && sr.height() < viewport()->size().height())
-		centerOn(sr.center());
-	else
-		centerOn((spos * (os/mapScale(_zoom))) - offset);
-
-	_mapScale->setZoom(_zoom);
+	_res = _map->resolution(center);
+	_mapScale->setResolution(_res);
 
 	resetCachedContent();
 }
 
 void PathView::wheelEvent(QWheelEvent *event)
 {
-	int z = (event->delta() > 0) ?
-		qMin(_zoom + 1, ZOOM_MAX) : qMax(_zoom - 1, ZOOM_MIN);
+	qreal os, ns;
 
-	zoom(z, event->pos());
+	os = _map->zoom();
+	Coordinates c = _map->xy2ll(mapToScene(event->pos()));
+
+	ns = (event->delta() > 0) ? _map->zoomIn() : _map->zoomOut();
+	if (ns != os)
+		zoom(event->pos(), c);
 }
 
 void PathView::mouseDoubleClickEvent(QMouseEvent *event)
 {
+	qreal os, ns;
+
 	if (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)
 		return;
 
-	int z = (event->button() == Qt::LeftButton) ?
-		qMin(_zoom + 1, ZOOM_MAX) : qMax(_zoom - 1, ZOOM_MIN);
+	os = _map->zoom();
+	Coordinates c = _map->xy2ll(mapToScene(event->pos()));
 
-	zoom(z, event->pos());
+	ns = (event->button() == Qt::LeftButton) ? _map->zoomIn() : _map->zoomOut();
+	if (ns != os)
+		zoom(event->pos(), c);
 }
 
 void PathView::keyPressEvent(QKeyEvent *event)
 {
-	int z = -1;
+	qreal os, ns;
+
+	os = _map->zoom();
+	QPoint pos = QRect(QPoint(), viewport()->size()).center();
+	Coordinates c = _map->xy2ll(mapToScene(pos));
 
 	if (event->matches(QKeySequence::ZoomIn))
-		z = qMin(_zoom + 1, ZOOM_MAX);
-	if (event->matches(QKeySequence::ZoomOut))
-		z = qMax(_zoom - 1, ZOOM_MIN);
-
-	if (z >= 0)
-		zoom(z, QRect(QPoint(), size()).center());
-	else
+		ns = _map->zoomIn();
+	else if (event->matches(QKeySequence::ZoomOut))
+		ns = _map->zoomOut();
+	else {
 		QWidget::keyPressEvent(event);
+		return;
+	}
+
+	if (ns != os)
+		zoom(pos, c);
 }
 
 void PathView::plot(QPainter *painter, const QRectF &target)
@@ -501,6 +439,7 @@ void PathView::plot(QPainter *painter, const QRectF &target)
 
 	setUpdatesEnabled(false);
 	_plot = true;
+	_map->setBlockingMode(true);
 
 	QPointF pos = _mapScale->pos();
 	_mapScale->setPos(mapToScene(QPoint(adj.bottomRight() + QPoint(
@@ -511,6 +450,7 @@ void PathView::plot(QPainter *painter, const QRectF &target)
 
 	_mapScale->setPos(pos);
 
+	_map->setBlockingMode(false);
 	_plot = false;
 	setUpdatesEnabled(true);
 }
@@ -527,11 +467,11 @@ void PathView::clear()
 	_scene->clear();
 	_palette.reset();
 
-	_zoom = ZOOM_MAX;
 	_tr = QRectF(); _rr = QRectF(); _wr = QRectF();
 	_wp = QPointF();
 
-	_scene->setSceneRect(QRectF());
+	setSceneRect(_map->bounds());
+	_res = _map->resolution(_scene->sceneRect().center());
 }
 
 void PathView::showTracks(bool show)
@@ -575,6 +515,12 @@ void PathView::showRouteWaypoints(bool show)
 
 	for (int i = 0; i < _routes.size(); i++)
 		_routes.at(i)->showWaypoints(show);
+}
+
+void PathView::showMap(bool show)
+{
+	_showMap = show;
+	resetCachedContent();
 }
 
 void PathView::showPOI(bool show)
@@ -640,57 +586,25 @@ void PathView::setRouteStyle(Qt::PenStyle style)
 
 void PathView::drawBackground(QPainter *painter, const QRectF &rect)
 {
-	if ((_tracks.isEmpty() && _routes.isEmpty() && _waypoints.isEmpty())
-	  || !_map) {
+	if (_showMap)
+		_map->draw(painter, rect);
+	else
 		painter->fillRect(rect, Qt::white);
-		return;
-	}
-
-	qreal scale = mapScale(_zoom);
-	QRectF rr(rect.topLeft() * scale, rect.size());
-	QPoint tile = mercator2tile(QPointF(rr.topLeft().x(), -rr.topLeft().y()),
-	  _zoom);
-	QPointF tm = tile2mercator(tile, _zoom);
-	QPoint tl = mapToScene(mapFromScene(QPointF(tm.x() / scale,
-	  -tm.y() / scale))).toPoint();
-
-	QList<Tile> tiles;
-	for (int i = 0; i <= rr.size().width() / Tile::size() + 1; i++) {
-		for (int j = 0; j <= rr.size().height() / Tile::size() + 1; j++) {
-			tiles.append(Tile(QPoint(tile.x() + i, tile.y() + j), _zoom));
-		}
-	}
-
-	_map->loadTiles(tiles, _plot);
-
-	for (int i = 0; i < tiles.count(); i++) {
-		Tile &t = tiles[i];
-		QPoint tp(tl.x() + (t.xy().x() - tile.x()) * Tile::size(),
-		  tl.y() + (t.xy().y() - tile.y()) * Tile::size());
-		painter->drawPixmap(tp, t.pixmap());
-	}
 }
 
 void PathView::resizeEvent(QResizeEvent *event)
 {
-	if (_tracks.isEmpty() && _routes.isEmpty() && _waypoints.isEmpty())
-		return;
+	Q_UNUSED(event);
 
-	rescale();
+	qreal scale = _map->zoom();
+	if (mapScale() != scale)
+		rescale();
 
-	QRectF sr = contentsSceneRect();
+	QPointF center = contentCenter();
+	centerOn(center);
 
-	if (sr.width() < event->size().width()) {
-		qreal diff = event->size().width() - sr.width();
-		sr.adjust(-diff/2, 0, diff/2, 0);
-	}
-	if (sr.height() < event->size().height()) {
-		qreal diff = event->size().height() - sr.height();
-		sr.adjust(0, -diff/2, 0, diff/2);
-	}
-
-	_scene->setSceneRect(sr);
-	centerOn(sr.center());
+	_res = _map->resolution(center);
+	_mapScale->setResolution(_res);
 
 	resetCachedContent();
 }
@@ -706,13 +620,23 @@ void PathView::paintEvent(QPaintEvent *event)
 	QGraphicsView::paintEvent(event);
 }
 
+void PathView::scrollContentsBy(int dx, int dy)
+{
+	QGraphicsView::scrollContentsBy(dx, dy);
+
+	QPointF center = mapToScene(viewport()->rect().center());
+	qreal res = _map->resolution(center);
+
+	if (qMax(res, _res) / qMin(res, _res) > 1.1) {
+		_mapScale->setResolution(res);
+		_res = res;
+	}
+}
+
 void PathView::useOpenGL(bool use)
 {
-	if (use) {
-#ifdef Q_OS_WIN32
-		if (QSysInfo::WindowsVersion >= QSysInfo::WV_VISTA)
-#endif // Q_OS_WIN32
-	setViewport(new OPENGL_WIDGET);
-	} else
+	if (use)
+		setViewport(new OPENGL_WIDGET);
+	else
 		setViewport(new QWidget);
 }

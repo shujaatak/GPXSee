@@ -12,7 +12,7 @@ KML, FIT, IGC and NMEA files.
 * Native GUI for Windows, Mac OS X and Linux.
 * Opens GPX, TCX, FIT, KML, IGC, NMEA and Garmin CSV files.
 
-![GPXSee - Linux](https://a.fsdn.com/con/app/proj/gpxsee/screenshots/linux.png)
+![GPXSee - Linux](https://a.fsdn.com/con/app/proj/gpxsee/screenshots/linux2.png)
 
 ## Build
 ### Linux/OS X
@@ -29,8 +29,8 @@ nmake release
 ```
 
 ## Binaries
-* Windows & OS X builds: http://sourceforge.net/projects/gpxsee
-* Linux packages: https://build.opensuse.org/project/repositories/home:tumic:GPXSee
+* [Windows & OS X builds](http://sourceforge.net/projects/gpxsee)
+* [Linux packages](http://software.opensuse.org/download.html?project=home%3Atumic%3AGPXSee&package=gpxsee)
 
 ## Homepage
 GPXSee homepage: http://tumic.wz.cz/gpxsee

@@ -2,12 +2,13 @@
 #define DOWNLOADER_H
 
 #include <QNetworkAccessManager>
-#include <QNetworkRequest>
-#include <QNetworkReply>
 #include <QUrl>
 #include <QList>
+#include <QMap>
 #include <QSet>
 
+
+class QNetworkReply;
 
 class Download
 {
@@ -28,8 +29,8 @@ class Downloader : public QObject
 	Q_OBJECT
 
 public:
-	static Downloader& instance()
-		{static Downloader i; return i;}
+	Downloader(QObject *parent = 0);
+
 	bool get(const QList<Download> &list);
 
 signals:
@@ -39,15 +40,28 @@ private slots:
 	void downloadFinished(QNetworkReply *reply);
 
 private:
-	Downloader();
-	Downloader(Downloader const&);
-	void operator=(Downloader const&);
+	class Redirect
+	{
+	public:
+		Redirect() : _level(0) {}
+		Redirect(const QUrl &origin, int level) :
+		  _origin(origin), _level(level) {}
 
-	bool doDownload(const Download &dl);
+		const QUrl &origin() const {return _origin;}
+		int level() const {return _level;}
+
+		bool isNull() const {return (_level == 0);}
+
+	private:
+		QUrl _origin;
+		int _level;
+	};
+
+	bool doDownload(const Download &dl, const Redirect &redirect = Redirect());
 	bool saveToDisk(const QString &filename, QIODevice *data);
 
 	QNetworkAccessManager _manager;
-	QList<QNetworkReply *> _currentDownloads;
+	QMap<QUrl, QNetworkReply *> _currentDownloads;
 	QSet<QUrl> _errorDownloads;
 };
 
