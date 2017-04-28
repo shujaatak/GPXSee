@@ -1,7 +1,7 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QWheelEvent>
-#include <QSysInfo>
+#include <QApplication>
 #include "opengl.h"
 #include "misc.h"
 #include "poi.h"
@@ -12,9 +12,11 @@
 #include "routeitem.h"
 #include "waypointitem.h"
 #include "scaleitem.h"
+#include "keys.h"
 #include "pathview.h"
 
-
+#define MAX_ZOOM      1
+#define MIN_ZOOM      -3
 #define MARGIN        10.0
 #define SCALE_OFFSET  7
 
@@ -48,6 +50,7 @@ PathView::PathView(Map *map, POI *poi, QWidget *parent)
 
 	_mapScale = new ScaleItem();
 	_mapScale->setZValue(2.0);
+	_mapScale->setFlag(QGraphicsItem::ItemIgnoresTransformations);
 
 	_map = map;
 	_poi = poi;
@@ -71,8 +74,9 @@ PathView::PathView(Map *map, POI *poi, QWidget *parent)
 	_routeStyle = Qt::DashLine;
 
 	_plot = false;
+	_digitalZoom = 0;
 
-	setSceneRect(_map->bounds());
+	_scene->setSceneRect(_map->bounds());
 	_res = _map->resolution(_scene->sceneRect().center());
 }
 
@@ -93,7 +97,7 @@ PathItem *PathView::addTrack(const Track &track)
 	_tracks.append(ti);
 	_tr |= ti->path().boundingRect();
 	ti->setColor(_palette.nextColor());
-	ti->setWidth(_trackWidth);
+	ti->setWidth(_trackWidth * pow(2, -_digitalZoom));
 	ti->setStyle(_trackStyle);
 	ti->setVisible(_showTracks);
 	_scene->addItem(ti);
@@ -114,7 +118,7 @@ PathItem *PathView::addRoute(const Route &route)
 	_routes.append(ri);
 	_rr |= ri->path().boundingRect();
 	ri->setColor(_palette.nextColor());
-	ri->setWidth(_routeWidth);
+	ri->setWidth(_routeWidth * pow(2, -_digitalZoom));
 	ri->setStyle(_routeStyle);
 	ri->setVisible(_showRoutes);
 	ri->showWaypoints(_showRouteWaypoints);
@@ -138,6 +142,7 @@ void PathView::addWaypoints(const QList<Waypoint> &waypoints)
 		wi->setZValue(1);
 		wi->showLabel(_showWaypointLabels);
 		wi->setVisible(_showWaypoints);
+		wi->setFlag(QGraphicsItem::ItemIgnoresTransformations);
 		_scene->addItem(wi);
 	}
 
@@ -231,7 +236,8 @@ void PathView::updatePOIVisibility()
 
 void PathView::rescale()
 {
-	setSceneRect(_map->bounds());
+	_scene->setSceneRect(_map->bounds());
+	resetCachedContent();
 
 	for (int i = 0; i < _tracks.size(); i++)
 		_tracks.at(i)->setMap(_map);
@@ -267,8 +273,10 @@ void PathView::setMap(Map *map)
 	_map->load();
 	connect(_map, SIGNAL(loaded()), this, SLOT(redraw()));
 
+	resetDigitalZoom();
+
 	mapScale();
-	setSceneRect(_map->bounds());
+	_scene->setSceneRect(_map->bounds());
 
 	for (int i = 0; i < _tracks.size(); i++)
 		_tracks.at(i)->setMap(map);
@@ -276,6 +284,11 @@ void PathView::setMap(Map *map)
 		_routes.at(i)->setMap(map);
 	for (int i = 0; i < _waypoints.size(); i++)
 		_waypoints.at(i)->setMap(map);
+
+	QHash<Waypoint, WaypointItem*>::const_iterator it;
+	for (it = _pois.constBegin(); it != _pois.constEnd(); it++)
+		it.value()->setMap(_map);
+	updatePOIVisibility();
 
 	QPointF center = contentCenter();
 	centerOn(center);
@@ -327,6 +340,7 @@ void PathView::addPOI(const QVector<Waypoint> &waypoints)
 		pi->setZValue(1);
 		pi->showLabel(_showPOILabels);
 		pi->setVisible(_showPOI);
+		pi->setFlag(QGraphicsItem::ItemIgnoresTransformations);
 		_scene->addItem(pi);
 
 		_pois.insert(w, pi);
@@ -356,67 +370,102 @@ void PathView::redraw()
 	resetCachedContent();
 }
 
-void PathView::zoom(const QPoint &pos, const Coordinates &c)
+void PathView::resetDigitalZoom()
 {
-	QPoint offset = pos - viewport()->rect().center();
+	_digitalZoom = 0;
 
-	rescale();
+	resetTransform();
 
-	QPointF center = _map->ll2xy(c) - offset;
-	centerOn(center);
+	setTrackWidth(_trackWidth);
+	setRouteWidth(_routeWidth);
+}
 
-	_res = _map->resolution(center);
-	_mapScale->setResolution(_res);
+void PathView::digitalZoom(int zoom)
+{
+	_digitalZoom += zoom;
+	scale(pow(2, zoom), pow(2, zoom));
 
-	resetCachedContent();
+	setTrackWidth(_trackWidth);
+	setRouteWidth(_routeWidth);
+
+	_mapScale->setResolution(_res * pow(2, -_digitalZoom));
+}
+
+void PathView::zoom(int zoom, const QPoint &pos, const Coordinates &c)
+{
+	bool shift = QApplication::keyboardModifiers() & Qt::ShiftModifier;
+
+	if (_digitalZoom) {
+		if (((_digitalZoom > 0 && zoom > 0) && (!shift || _digitalZoom
+		  >= MAX_ZOOM)) || ((_digitalZoom < 0 && zoom < 0) && (!shift
+		  || _digitalZoom <= MIN_ZOOM)))
+			return;
+
+		digitalZoom(zoom);
+	} else {
+		qreal os, ns;
+		os = _map->zoom();
+		ns = (zoom > 0) ? _map->zoomIn() : _map->zoomOut();
+
+		if (ns != os) {
+			QPoint offset = pos - viewport()->rect().center();
+
+			rescale();
+
+			QPointF center = _map->ll2xy(c) - offset;
+			centerOn(center);
+
+			_res = _map->resolution(center);
+			_mapScale->setResolution(_res);
+		} else {
+			if (shift)
+				digitalZoom(zoom);
+		}
+	}
 }
 
 void PathView::wheelEvent(QWheelEvent *event)
 {
-	qreal os, ns;
+	static int deg = 0;
 
-	os = _map->zoom();
+	deg += event->delta() / 8;
+	if (qAbs(deg) < 15)
+		return;
+	deg = 0;
+
 	Coordinates c = _map->xy2ll(mapToScene(event->pos()));
-
-	ns = (event->delta() > 0) ? _map->zoomIn() : _map->zoomOut();
-	if (ns != os)
-		zoom(event->pos(), c);
+	zoom((event->delta() > 0) ? 1 : -1, event->pos(), c);
 }
 
 void PathView::mouseDoubleClickEvent(QMouseEvent *event)
 {
-	qreal os, ns;
-
 	if (event->button() != Qt::LeftButton && event->button() != Qt::RightButton)
 		return;
 
-	os = _map->zoom();
 	Coordinates c = _map->xy2ll(mapToScene(event->pos()));
-
-	ns = (event->button() == Qt::LeftButton) ? _map->zoomIn() : _map->zoomOut();
-	if (ns != os)
-		zoom(event->pos(), c);
+	zoom((event->button() == Qt::LeftButton) ? 1 : -1, event->pos(), c);
 }
 
 void PathView::keyPressEvent(QKeyEvent *event)
 {
-	qreal os, ns;
+	int z;
 
-	os = _map->zoom();
 	QPoint pos = QRect(QPoint(), viewport()->size()).center();
 	Coordinates c = _map->xy2ll(mapToScene(pos));
 
-	if (event->matches(QKeySequence::ZoomIn))
-		ns = _map->zoomIn();
-	else if (event->matches(QKeySequence::ZoomOut))
-		ns = _map->zoomOut();
-	else {
-		QWidget::keyPressEvent(event);
+	if (event->matches(ZOOM_IN))
+		z = 1;
+	else if (event->matches(ZOOM_OUT))
+		z = -1;
+	else if (_digitalZoom && event->key() == Qt::Key_Escape) {
+		resetDigitalZoom();
+		return;
+	} else {
+		QGraphicsView::keyPressEvent(event);
 		return;
 	}
 
-	if (ns != os)
-		zoom(pos, c);
+	zoom(z, pos, c);
 }
 
 void PathView::plot(QPainter *painter, const QRectF &target)
@@ -428,7 +477,7 @@ void PathView::plot(QPainter *painter, const QRectF &target)
 	orig = viewport()->rect();
 
 	if (orig.height() * (target.width() / target.height()) - orig.width() < 0) {
-		ratio = target.height()/target.width();
+		ratio = target.height() / target.width();
 		diff = (orig.width() * ratio) - orig.height();
 		adj = orig.adjusted(0, -diff/2, 0, diff/2);
 	} else {
@@ -470,8 +519,10 @@ void PathView::clear()
 	_tr = QRectF(); _rr = QRectF(); _wr = QRectF();
 	_wp = QPointF();
 
-	setSceneRect(_map->bounds());
-	_res = _map->resolution(_scene->sceneRect().center());
+	_digitalZoom = 0;
+	resetTransform();
+
+	resetCachedContent();
 }
 
 void PathView::showTracks(bool show)
@@ -557,7 +608,7 @@ void PathView::setTrackWidth(int width)
 	_trackWidth = width;
 
 	for (int i = 0; i < _tracks.count(); i++)
-		_tracks.at(i)->setWidth(width);
+		_tracks.at(i)->setWidth(width * pow(2, -_digitalZoom));
 }
 
 void PathView::setRouteWidth(int width)
@@ -565,7 +616,7 @@ void PathView::setRouteWidth(int width)
 	_routeWidth = width;
 
 	for (int i = 0; i < _routes.count(); i++)
-		_routes.at(i)->setWidth(width);
+		_routes.at(i)->setWidth(width * pow(2, -_digitalZoom));
 }
 
 void PathView::setTrackStyle(Qt::PenStyle style)
@@ -594,8 +645,6 @@ void PathView::drawBackground(QPainter *painter, const QRectF &rect)
 
 void PathView::resizeEvent(QResizeEvent *event)
 {
-	Q_UNUSED(event);
-
 	qreal scale = _map->zoom();
 	if (mapScale() != scale)
 		rescale();
@@ -606,7 +655,7 @@ void PathView::resizeEvent(QResizeEvent *event)
 	_res = _map->resolution(center);
 	_mapScale->setResolution(_res);
 
-	resetCachedContent();
+	QGraphicsView::resizeEvent(event);
 }
 
 void PathView::paintEvent(QPaintEvent *event)

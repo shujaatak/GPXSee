@@ -26,7 +26,7 @@ struct Header
 	char devmajor[8];             /* 329 */
 	char devminor[8];             /* 337 */
 	char prefix[155];             /* 345 */
-								  /* 500 */
+	                              /* 500 */
 };
 
 static quint64 number(const char* data, size_t size)
@@ -45,18 +45,31 @@ static quint64 number(const char* data, size_t size)
 
 bool Tar::load(const QString &path)
 {
-	struct Header hdr;
+	char buffer[BLOCKSIZE];
+	struct Header *hdr = (struct Header*)&buffer;
 	quint64 size;
+	qint64 ret;
+
+	if (_file.isOpen())
+		_file.close();
+	_index.clear();
 
 	_file.setFileName(path);
 	if (!_file.open(QIODevice::ReadOnly))
 		return false;
 
-	while (_file.read((char*)&hdr, BLOCKSIZE)) {
-		size = number(hdr.size, sizeof(hdr.size));
+	while ((ret = _file.read(buffer, BLOCKSIZE)) > 0) {
+		if (ret < BLOCKSIZE) {
+			_file.close();
+			return false;
+		}
+		size = number(hdr->size, sizeof(hdr->size));
 		if (size)
-			_index.insert(hdr.name, Info(size, _file.pos()));
-		_file.seek(_file.pos() + BLOCKCOUNT(size) * BLOCKSIZE);
+			_index.insert(hdr->name, Info(size, _file.pos()));
+		if (!_file.seek(_file.pos() + BLOCKCOUNT(size) * BLOCKSIZE)) {
+			_file.close();
+			return false;
+		}
 	}
 
 	return true;
@@ -65,8 +78,10 @@ bool Tar::load(const QString &path)
 QByteArray Tar::file(const QString &name)
 {
 	QMap<QString, Tar::Info>::const_iterator it = _index.find(name);
-	Q_ASSERT(it != _index.end());
+	if (it == _index.end())
+		return QByteArray();
 
+	Q_ASSERT(_file.isOpen());
 	if (_file.seek(it.value().offset()))
 		return _file.read(it.value().size());
 	else

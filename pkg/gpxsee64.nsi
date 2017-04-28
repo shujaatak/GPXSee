@@ -5,7 +5,7 @@
 ; The name of the installer
 Name "GPXSee"
 ; Program version
-!define VERSION "4.0"
+!define VERSION "4.5"
 
 ; The file to write
 OutFile "GPXSee-${VERSION}_x64.exe"
@@ -22,7 +22,7 @@ VIAddVersionKey "ProductVersion" ${VERSION}
 VIAddVersionKey "FileVersion" "${VERSION}.0.0"
 VIAddVersionKey "ProductName" "GPXSee"
 VIAddVersionKey "LegalCopyright" "GPXSee project"
-VIAddVersionKey "FileDescription" "GPXSee installer (64b)"
+VIAddVersionKey "FileDescription" "GPXSee installer (x64)"
 
 ; Registry key to check for directory (so if you install again, it will 
 ; overwrite the old one automatically)
@@ -89,6 +89,8 @@ Section "GPXSee" SEC_APP
   ; Put the files there
   File "gpxsee.exe"
   File "maps.txt"
+  File "ellipsoids.csv"
+  File "datums.csv"
   
   ; Create start menu entry and add links
   SetShellVarContext all
@@ -106,7 +108,7 @@ Section "GPXSee" SEC_APP
   WriteRegStr HKLM SOFTWARE\GPXSee "Install_Dir" "$INSTDIR"
 
   ; Write the uninstall keys for Windows
-  WriteRegStr HKLM "${REGENTRY}" "DisplayName" "GPXSee"
+  WriteRegStr HKLM "${REGENTRY}" "DisplayName" "GPXSee (x64)"
   WriteRegStr HKLM "${REGENTRY}" "Publisher" "Martin Tuma"
   WriteRegStr HKLM "${REGENTRY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "${REGENTRY}" "UninstallString" '"$INSTDIR\uninstall.exe"'

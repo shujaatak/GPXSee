@@ -26,9 +26,10 @@
 #include "keys.h"
 #include "settings.h"
 #include "data.h"
+#include "ellipsoid.h"
+#include "datum.h"
 #include "map.h"
 #include "maplist.h"
-#include "mapdir.h"
 #include "emptymap.h"
 #include "elevationgraph.h"
 #include "speedgraph.h"
@@ -47,6 +48,7 @@
 
 GUI::GUI()
 {
+	loadDatums();
 	loadMaps();
 	loadPOIs();
 
@@ -117,23 +119,94 @@ void GUI::createBrowser()
 	_browser->setFilter(filter);
 }
 
+void GUI::loadDatums()
+{
+	QString ef, df;
+	bool ok = false;
+
+	if (QFile::exists(USER_ELLIPSOID_FILE))
+		ef = USER_ELLIPSOID_FILE;
+	else if (QFile::exists(GLOBAL_ELLIPSOID_FILE))
+		ef = GLOBAL_ELLIPSOID_FILE;
+	else
+		qWarning("No ellipsoids file found.");
+
+	if (QFile::exists(USER_DATUM_FILE))
+		df = USER_DATUM_FILE;
+	else if (QFile::exists(GLOBAL_DATUM_FILE))
+		df = GLOBAL_DATUM_FILE;
+	else
+		qWarning("No datums file found.");
+
+	if (!ef.isNull() && !df.isNull()) {
+		if (!Ellipsoid::loadList(ef)) {
+			if (Ellipsoid::errorLine())
+				qWarning("%s: parse error on line %d: %s", qPrintable(ef),
+				  Ellipsoid::errorLine(), qPrintable(Ellipsoid::errorString()));
+			else
+				qWarning("%s: %s", qPrintable(ef), qPrintable(
+				  Ellipsoid::errorString()));
+		} else {
+			if (!Datum::loadList(df)) {
+				if (Datum::errorLine())
+					qWarning("%s: parse error on line %d: %s", qPrintable(ef),
+					  Datum::errorLine(), qPrintable(Datum::errorString()));
+				else
+					qWarning("%s: %s", qPrintable(ef), qPrintable(
+					  Datum::errorString()));
+			} else
+				ok = true;
+		}
+	}
+
+	if (!ok)
+		qWarning("Maps based on a datum different from WGS84 won't work.");
+}
+
 void GUI::loadMaps()
 {
-	QList<Map*> online, offline;
+	_ml = new MapList(this);
+
+	QString offline, online;
 
 	if (QFile::exists(USER_MAP_FILE))
-		online = MapList::load(USER_MAP_FILE, this);
-	else
-		online = MapList::load(GLOBAL_MAP_FILE, this);
+		online = USER_MAP_FILE;
+	else if (QFile::exists(GLOBAL_MAP_FILE))
+		online = GLOBAL_MAP_FILE;
+
+	if (!online.isNull() && !_ml->loadList(online))
+		qWarning("%s: %s", qPrintable(online), qPrintable(_ml->errorString()));
+
 
 	if (QFile::exists(USER_MAP_DIR))
-		offline = MapDir::load(USER_MAP_DIR, this);
-	else
-		offline = MapDir::load(GLOBAL_MAP_DIR, this);
+		offline = USER_MAP_DIR;
+	else if (QFile::exists(GLOBAL_MAP_DIR))
+		offline = GLOBAL_MAP_DIR;
 
-	_maps = online + offline;
+	if (!offline.isNull()) {
+		QDir md(offline);
+		QFileInfoList ml = md.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+		QStringList filters;
+		filters << "*.map" << "*.tba" << "*.tar";
 
-	_map = _maps.isEmpty() ? new EmptyMap(this) : _maps.first();
+		for (int i = 0; i < ml.size(); i++) {
+			QDir dir(ml.at(i).absoluteFilePath());
+			QFileInfoList fl = dir.entryInfoList(filters, QDir::Files);
+
+			if (fl.isEmpty())
+				qWarning("%s: no map/atlas file found",
+				  qPrintable(ml.at(i).absoluteFilePath()));
+			else if (fl.size() > 1)
+				qWarning("%s: ambiguous directory content",
+				  qPrintable(ml.at(i).absoluteFilePath()));
+			else
+				if (!_ml->loadMap(fl.first().absoluteFilePath()))
+					qWarning("%s: %s", qPrintable(fl.first().absoluteFilePath()),
+					  qPrintable(_ml->errorString()));
+		}
+	}
+
+	_map = _ml->maps().isEmpty() ? new EmptyMap(this) : _ml->maps().first();
 }
 
 void GUI::loadPOIs()
@@ -162,33 +235,33 @@ void GUI::loadPOIs()
 
 void GUI::createMapActions()
 {
-	QActionGroup *ag = new QActionGroup(this);
-	ag->setExclusive(true);
+	_mapsSignalMapper = new QSignalMapper(this);
+	_mapsActionGroup = new QActionGroup(this);
+	_mapsActionGroup->setExclusive(true);
 
-	QSignalMapper *sm = new QSignalMapper(this);
-
-	for (int i = 0; i < _maps.count(); i++) {
-		QAction *a = new QAction(_maps.at(i)->name(), this);
+	for (int i = 0; i < _ml->maps().count(); i++) {
+		QAction *a = new QAction(_ml->maps().at(i)->name(), this);
 		a->setCheckable(true);
-		a->setActionGroup(ag);
+		a->setActionGroup(_mapsActionGroup);
 
-		sm->setMapping(a, i);
-		connect(a, SIGNAL(triggered()), sm, SLOT(map()));
+		_mapsSignalMapper->setMapping(a, i);
+		connect(a, SIGNAL(triggered()), _mapsSignalMapper, SLOT(map()));
 
 		_mapActions.append(a);
 	}
 
-	connect(sm, SIGNAL(mapped(int)), this, SLOT(mapChanged(int)));
+	connect(_mapsSignalMapper, SIGNAL(mapped(int)), this,
+	  SLOT(mapChanged(int)));
 }
 
 void GUI::createPOIFilesActions()
 {
-	_poiFilesSM = new QSignalMapper(this);
+	_poiFilesSignalMapper = new QSignalMapper(this);
 
 	for (int i = 0; i < _poi->files().count(); i++)
 		createPOIFileAction(i);
 
-	connect(_poiFilesSM, SIGNAL(mapped(int)), this, SLOT(poiFileChecked(int)));
+	connect(_poiFilesSignalMapper, SIGNAL(mapped(int)), this, SLOT(poiFileChecked(int)));
 }
 
 QAction *GUI::createPOIFileAction(int index)
@@ -197,8 +270,8 @@ QAction *GUI::createPOIFileAction(int index)
 	  this);
 	a->setCheckable(true);
 
-	_poiFilesSM->setMapping(a, index);
-	connect(a, SIGNAL(triggered()), _poiFilesSM, SLOT(map()));
+	_poiFilesSignalMapper->setMapping(a, index);
+	connect(a, SIGNAL(triggered()), _poiFilesSignalMapper, SLOT(map()));
 
 	_poiFilesActions.append(a);
 
@@ -294,23 +367,24 @@ void GUI::createActions()
 	connect(_showMapAction, SIGNAL(triggered(bool)), _pathView,
 	  SLOT(showMap(bool)));
 	addAction(_showMapAction);
+	_loadMapAction = new QAction(QIcon(QPixmap(OPEN_FILE_ICON)), tr("Load map"),
+	  this);
+	connect(_loadMapAction, SIGNAL(triggered()), this, SLOT(loadMap()));
 	_clearMapCacheAction = new QAction(tr("Clear tile cache"), this);
 	connect(_clearMapCacheAction, SIGNAL(triggered()), this,
 	  SLOT(clearMapCache()));
-	if (_maps.empty()) {
+	createMapActions();
+	_nextMapAction = new QAction(tr("Next map"), this);
+	_nextMapAction->setShortcut(NEXT_MAP_SHORTCUT);
+	connect(_nextMapAction, SIGNAL(triggered()), this, SLOT(nextMap()));
+	addAction(_nextMapAction);
+	_prevMapAction = new QAction(tr("Next map"), this);
+	_prevMapAction->setShortcut(PREV_MAP_SHORTCUT);
+	connect(_prevMapAction, SIGNAL(triggered()), this, SLOT(prevMap()));
+	addAction(_prevMapAction);
+	if (_ml->maps().isEmpty()) {
 		_showMapAction->setEnabled(false);
 		_clearMapCacheAction->setEnabled(false);
-	} else {
-		createMapActions();
-
-		_nextMapAction = new QAction(tr("Next map"), this);
-		_nextMapAction->setShortcut(NEXT_MAP_SHORTCUT);
-		connect(_nextMapAction, SIGNAL(triggered()), this, SLOT(nextMap()));
-		addAction(_nextMapAction);
-		_prevMapAction = new QAction(tr("Next map"), this);
-		_prevMapAction->setShortcut(PREV_MAP_SHORTCUT);
-		connect(_prevMapAction, SIGNAL(triggered()), this, SLOT(prevMap()));
-		addAction(_prevMapAction);
 	}
 
 	// Data actions
@@ -437,12 +511,13 @@ void GUI::createMenus()
 	fileMenu->addAction(_exitAction);
 #endif // Q_OS_MAC
 
-	QMenu *mapMenu = menuBar()->addMenu(tr("Map"));
-	mapMenu->addActions(_mapActions);
-	mapMenu->addSeparator();
-	mapMenu->addAction(_clearMapCacheAction);
-	mapMenu->addSeparator();
-	mapMenu->addAction(_showMapAction);
+	_mapMenu = menuBar()->addMenu(tr("Map"));
+	_mapMenu->addActions(_mapActions);
+	_mapsEnd = _mapMenu->addSeparator();
+	_mapMenu->addAction(_loadMapAction);
+	_mapMenu->addAction(_clearMapCacheAction);
+	_mapMenu->addSeparator();
+	_mapMenu->addAction(_showMapAction);
 
 	QMenu *graphMenu = menuBar()->addMenu(tr("Graph"));
 	graphMenu->addAction(_distanceGraphAction);
@@ -594,18 +669,24 @@ void GUI::keys()
 	msgBox.setWindowTitle(tr("Keyboard controls"));
 	msgBox.setText("<h3>" + tr("Keyboard controls") + "</h3>");
 	msgBox.setInformativeText(
-	  "<div><table width=\"300\"><tr><td>" + tr("Next file")
-	  + "</td><td><i>" + QKeySequence(NEXT_KEY).toString()
+	  "<style>td {padding-right: 1.5em;}</style><div><table><tr><td>"
+	  + tr("Next file") + "</td><td><i>" + QKeySequence(NEXT_KEY).toString()
 	  + "</i></td></tr><tr><td>" + tr("Previous file")
 	  + "</td><td><i>" + QKeySequence(PREV_KEY).toString()
 	  + "</i></td></tr><tr><td>" + tr("First file") + "</td><td><i>"
 	  + QKeySequence(FIRST_KEY).toString() + "</i></td></tr><tr><td>"
 	  + tr("Last file") + "</td><td><i>" + QKeySequence(LAST_KEY).toString()
-	  + "</i></td></tr><tr><td>" + tr("Append modifier")
-	  + "</td><td><i>SHIFT</i></td></tr><tr><td></td><td></td></tr><tr><td>"
-	  + tr("Next map") + "</td><td><i>" + NEXT_MAP_SHORTCUT.toString()
-	  + "</i></td></tr><tr><td>" + tr("Previous map") + "</td><td><i>"
-	  + PREV_MAP_SHORTCUT.toString() + "</i></td></tr></table></div>");
+	  + "</i></td></tr><tr><td>" + tr("Append file")
+	  + "</td><td><i>" + QKeySequence(MODIFIER).toString() + tr("Next/Previous")
+	  + "</i></td></tr><tr><td></td><td></td></tr><tr><td>" + tr("Next map")
+	  + "</td><td><i>" + NEXT_MAP_SHORTCUT.toString() + "</i></td></tr><tr><td>"
+	  + tr("Previous map") + "</td><td><i>" + PREV_MAP_SHORTCUT.toString()
+	  + "</i></td></tr><tr><td></td><td></td></tr><tr><td>" + tr("Zoom in")
+	  + "</td><td><i>" + QKeySequence(ZOOM_IN).toString()
+	  + "</i></td></tr><tr><td>" + tr("Zoom out") + "</td><td><i>"
+	  + QKeySequence(ZOOM_OUT).toString() + "</i></td></tr><tr><td>"
+	  + tr("Digital zoom") + "</td><td><i>" + QKeySequence(MODIFIER).toString()
+	  + tr("Zoom") + "</i></td></tr></table></div>");
 
 	msgBox.exec();
 }
@@ -617,16 +698,24 @@ void GUI::dataSources()
 	msgBox.setWindowTitle(tr("Data sources"));
 	msgBox.setText("<h3>" + tr("Data sources") + "</h3>");
 	msgBox.setInformativeText(
-	  "<h4>" + tr("Map sources") + "</h4><p>"
-	  + tr("Map (tiles) source URLs are read on program startup from the "
+	  "<h4>" + tr("Online maps") + "</h4><p>"
+	  + tr("Online map URLs are read on program startup from the "
 		"following file:")
-		+ "</p><p><code>" + USER_MAP_FILE + "</code></p><p>"
-		+ tr("The file format is one map entry per line, consisting of the map "
-		  "name and tiles URL delimited by a TAB character. The tile X and Y "
-		  "coordinates are replaced with $x and $y in the URL and the zoom "
-		  "level is replaced with $z. An example map file could look like:")
-		+ "</p><p><code>Map1	http://tile.server.com/map/$z/$x/$y.png"
+	  + "</p><p><code>" + USER_MAP_FILE + "</code></p><p>"
+	  + tr("The file format is one map entry per line, consisting of the map "
+		"name and tiles URL delimited by a TAB character. The tile X and Y "
+		"coordinates are replaced with $x and $y in the URL and the zoom "
+		"level is replaced with $z. An example map file could look like:")
+	  + "</p><p><code>Map1	http://tile.server.com/map/$z/$x/$y.png"
 		  "<br/>Map2	http://mapserver.org/map/$z-$x-$y</code></p>"
+
+	  + "<h4>" + tr("Offline maps") + "</h4><p>"
+	  + tr("Offline maps are loaded on program startup from the following "
+		"directory:")
+	  + "</p><p><code>" + USER_MAP_DIR + "</code></p><p>"
+	  + tr("The expected structure is one map/atlas in a separate subdirectory."
+		" Supported map formats are OziExplorer image-based maps and tiled"
+		" TrekBuddy maps/atlases (tared and non-tared).") + "</p>"
 
 	  + "<h4>" + tr("POIs") + "</h4><p>"
 	  + tr("To make GPXSee load a POI file automatically on startup, add "
@@ -1071,6 +1160,32 @@ void GUI::showGraphGrids(bool show)
 		_tabs.at(i)->showGrid(show);
 }
 
+void GUI::loadMap()
+{
+	QString fileName = QFileDialog::getOpenFileName(this, tr("Load map"),
+	  QString(), tr("Map files (*.map *.tba *.tar)"));
+
+	if (fileName.isEmpty())
+		return;
+
+	if (_ml->loadMap(fileName)) {
+		QAction *a = new QAction(_ml->maps().last()->name(), this);
+		a->setCheckable(true);
+		a->setActionGroup(_mapsActionGroup);
+		_mapsSignalMapper->setMapping(a, _ml->maps().size() - 1);
+		connect(a, SIGNAL(triggered()), _mapsSignalMapper, SLOT(map()));
+		_mapActions.append(a);
+		_mapMenu->insertAction(_mapsEnd, a);
+		_showMapAction->setEnabled(true);
+		_clearMapCacheAction->setEnabled(true);
+		a->activate(QAction::Trigger);
+	} else {
+		QString error = tr("Error loading map:") + "\n\n"
+		  + fileName + "\n\n" + _ml->errorString();
+		QMessageBox::critical(this, APP_NAME, error);
+	}
+}
+
 void GUI::clearMapCache()
 {
 	_map->clearCache();
@@ -1117,26 +1232,27 @@ void GUI::updateWindowTitle()
 
 void GUI::mapChanged(int index)
 {
-	_map = _maps.at(index);
+	_map = _ml->maps().at(index);
 	_pathView->setMap(_map);
 }
 
 void GUI::nextMap()
 {
-	if (_maps.count() < 2)
+	if (_ml->maps().count() < 2)
 		return;
 
-	int next = (_maps.indexOf(_map) + 1) % _maps.count();
+	int next = (_ml->maps().indexOf(_map) + 1) % _ml->maps().count();
 	_mapActions.at(next)->setChecked(true);
 	mapChanged(next);
 }
 
 void GUI::prevMap()
 {
-	if (_maps.count() < 2)
+	if (_ml->maps().count() < 2)
 		return;
 
-	int prev = (_maps.indexOf(_map) + _maps.count() - 1) % _maps.count();
+	int prev = (_ml->maps().indexOf(_map) + _ml->maps().count() - 1)
+	  % _ml->maps().count();
 	_mapActions.at(prev)->setChecked(true);
 	mapChanged(prev);
 }
@@ -1304,6 +1420,7 @@ void GUI::keyPressEvent(QKeyEvent *event)
 			if (_fullscreenAction->isChecked()) {
 				_fullscreenAction->setChecked(false);
 				showFullscreen(false);
+				return;
 			}
 			break;
 	}
@@ -1312,7 +1429,10 @@ void GUI::keyPressEvent(QKeyEvent *event)
 		if (!(event->modifiers() & MODIFIER))
 			closeFiles();
 		openFile(file);
+		return;
 	}
+
+	QMainWindow::keyPressEvent(event);
 }
 
 void GUI::closeEvent(QCloseEvent *event)
@@ -1513,10 +1633,10 @@ void GUI::readSettings()
 	settings.beginGroup(MAP_SETTINGS_GROUP);
 	if (settings.value(SHOW_MAP_SETTING, SHOW_MAP_DEFAULT).toBool())
 		_showMapAction->setChecked(true);
-	if (_maps.count()) {
+	if (_ml->maps().count()) {
 		int index = mapIndex(settings.value(CURRENT_MAP_SETTING).toString());
 		_mapActions.at(index)->setChecked(true);
-		_map = _maps.at(index);
+		_map = _ml->maps().at(index);
 		_pathView->setMap(_map);
 	}
 	settings.endGroup();
@@ -1678,8 +1798,8 @@ void GUI::readSettings()
 
 int GUI::mapIndex(const QString &name)
 {
-	for (int i = 0; i < _maps.count(); i++)
-		if (_maps.at(i)->name() == name)
+	for (int i = 0; i < _ml->maps().count(); i++)
+		if (_ml->maps().at(i)->name() == name)
 			return i;
 
 	return 0;
